@@ -11,10 +11,8 @@ from jax import Array
 from jax.example_libraries import optimizers as jax_opt
 
 
-def esn_params(input_scaling, esn_size, spectral_radius, a_dt, bias_scaling=0.8, seed=1235):
-    input_size = 1
-    output_size = 1
-    # bias_scaling = 0.8
+def esn_params(esn_size, input_size, output_size, input_scaling, spectral_radius, a_dt, bias_scaling=0.8, seed=1235):
+    
     prng = npy.random.default_rng(seed)
 
     def esn_ini(shape, spectral_radius):
@@ -205,26 +203,3 @@ def update(params, u_input, y_reconstruction, opt_state, opt_update, get_params,
     # SGD update
     opt_state = opt_update(epoch_idx, grads, opt_state)
     return opt_state, loss, er_c, er_mean, er_y, X, grads_norm
-
-
-def visualize_interpolation(params, C, ut_train, log_folder, filename):
-
-    len_seqs = 200
-
-    plt.figure()
-    # compute how the system interpolate
-    for lamda in [0, 0.5, 1]:
-        # t_interp = 100
-        t_interp = np.ones(len_seqs)*lamda
-        ut_interp = np.zeros(len_seqs)
-        YX_interpolation = forward_esn_interp(
-            params, C, ut_interp, None, t_interp=t_interp)
-
-        X_interp = YX_interpolation[:, ut_train.shape[2]:]
-        y_esn_interp = YX_interpolation[:, :ut_train.shape[2]]
-
-        plt.plot(y_esn_interp)
-
-    plt.savefig(f'{log_folder}/plots/interpolation_{filename}.png')
-    plt.close()
-    pass
