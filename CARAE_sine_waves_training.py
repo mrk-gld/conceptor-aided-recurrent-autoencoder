@@ -9,7 +9,7 @@ from jax.example_libraries import optimizers as jax_opt
 from numpy import Inf, NaN
 
 from rnn_utils import update
-from rnn_utils import esn_params
+from rnn_utils import rnn_params
 from rnn_utils import initialize_wout
 
 from utils import setup_logging_directory
@@ -63,17 +63,17 @@ def main(_):
 
     input_size = ut_train.shape[-1]
     output_size = yt_train.shape[-1]
-    params_ini = esn_params(512,input_size,output_size,1., 1., 0.1, 0.8, seed=21)
+    params_ini = rnn_params(512,input_size,output_size,1., 1., 0.1, 0.8, seed=21)
 
-    params_esn, _, _ = initialize_wout(
+    params_rnn, _, _ = initialize_wout(
         params_ini.copy(), ut_train, yt_train, reg_wout=10)
  
     opt_init, opt_update, get_params = jax_opt.adam(FLAGS.learning_rate)
-    opt_state = opt_init(params_esn.copy())
+    opt_state = opt_init(params_rnn.copy())
 
     for epoch_idx in tqdm(range(FLAGS.num_epochs)):
 
-        opt_state, loss, er_c, er_mean, er_y, X, grads_norm = update(params_esn,
+        opt_state, loss, er_c, er_mean, er_y, X, grads_norm = update(params_rnn,
                                                                      ut_train,
                                                                      yt_train,
                                                                      opt_state,

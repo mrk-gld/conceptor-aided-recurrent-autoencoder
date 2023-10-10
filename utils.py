@@ -4,7 +4,7 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 
-from rnn_utils import forward_esn_interp
+from rnn_utils import forward_rnn_interp
 
 def setup_logging_directory(logdir, name):
     """Create a new logging directory with the given name, or use the next available index."""
@@ -27,13 +27,13 @@ def visualize_sine_interpolation(params, C, ut_train, log_folder, filename):
         # t_interp = 100
         t_interp = jnp.ones(len_seqs)*lamda
         ut_interp = jnp.zeros(len_seqs)
-        YX_interpolation = forward_esn_interp(
+        YX_interpolation = forward_rnn_interp(
             params, C, ut_interp, None, t_interp=t_interp)
 
         X_interp = YX_interpolation[:, ut_train.shape[2]:]
-        y_esn_interp = YX_interpolation[:, :ut_train.shape[2]]
+        y_rnn_interp = YX_interpolation[:, :ut_train.shape[2]]
 
-        plt.plot(y_esn_interp)
+        plt.plot(y_rnn_interp)
 
     plt.savefig(f'{log_folder}/plots/interpolation_{filename}.png')
     plt.close()
@@ -61,7 +61,7 @@ def visualize_mocap_interpolation(params, c_matrix, ut_train, log_folder, filena
     for lamda in lamdas:
         t_interp = jnp.ones(len_seqs) * lamda
         ut_interp = jnp.zeros(len_seqs)
-        yx_interpolation = forward_esn_interp(
+        yx_interpolation = forward_rnn_interp(
             params, c_matrix, ut_interp, None, t_interp=t_interp)
 
         x_interpolation = yx_interpolation[:, ut_train.shape[2]:]

@@ -11,23 +11,23 @@ from jax import Array
 from jax.example_libraries import optimizers as jax_opt
 
 
-def esn_params(esn_size, input_size, output_size, input_scaling, spectral_radius, a_dt, bias_scaling=0.8, seed=1235):
+def rnn_params(rnn_size, input_size, output_size, input_scaling, spectral_radius, a_dt, bias_scaling=0.8, seed=1235):
     
     prng = npy.random.default_rng(seed)
 
-    def esn_ini(shape, spectral_radius):
+    def rnn_ini(shape, spectral_radius):
         w = prng.normal(size=shape)
         current_spectral_radius = max(abs(npy.linalg.eig(w)[0]))
         w *= spectral_radius / current_spectral_radius
         return w
-    params = dict(win=prng.normal(size=(esn_size, input_size))*input_scaling, w=esn_ini((esn_size, esn_size), spectral_radius), d=esn_ini((esn_size, esn_size), spectral_radius),
-                  bias=prng.normal(size=(esn_size,))*bias_scaling, wout=prng.normal(size=(output_size, esn_size)), bias_out=prng.normal(size=(output_size,))*bias_scaling,
-                  a_dt=a_dt*np.ones(esn_size), x_ini=0.1*prng.normal(size=(2, esn_size)))
+    params = dict(win=prng.normal(size=(rnn_size, input_size))*input_scaling, w=rnn_ini((rnn_size, rnn_size), spectral_radius), d=rnn_ini((rnn_size, rnn_size), spectral_radius),
+                  bias=prng.normal(size=(rnn_size,))*bias_scaling, wout=prng.normal(size=(output_size, rnn_size)), bias_out=prng.normal(size=(output_size,))*bias_scaling,
+                  a_dt=a_dt*np.ones(rnn_size), x_ini=0.1*prng.normal(size=(2, rnn_size)))
 
     return jax.tree_map(lambda x: np.array(x), params)
 
 
-def forward_esn(params, C_bottleneck, ut, idx, x_init=None, encoding=True, biased=False):
+def forward_rnn(params, C_bottleneck, ut, idx, x_init=None, encoding=True, biased=False):
     # u_clock can be used both for clock and for input (for initialization)
     if x_init is None:
         x_init = params["x_ini"][idx]
@@ -63,7 +63,7 @@ def forward_esn(params, C_bottleneck, ut, idx, x_init=None, encoding=True, biase
     return YX
 
 
-def forward_esn_interp(params, C_manifold, ut, x_init, t_interp):
+def forward_rnn_interp(params, C_manifold, ut, x_init, t_interp):
     if x_init is None:
         x_init = params["x_ini"][0]
 
@@ -122,11 +122,11 @@ def initialize_wout(params, ut, yt, reg_wout=10, washout=0):
     idx = np.array([0, 1])
 
     # Record input driven dyna
-    YX = jax.vmap(forward_esn, (None, None, 0, 0, None, None, None))(
+    YX = jax.vmap(forward_rnn, (None, None, 0, 0, None, None, None))(
         params, None, ut, idx, None, True, False)
 
     X = YX[:, :, ut.shape[2]:]
-    y_esn = YX[:, :, :ut.shape[2]]
+    y_rnn = YX[:, :, :ut.shape[2]]
 
     X_flat = X.reshape(-1, X.shape[-1])
     X_flat_bias = np.hstack((X_flat, np.ones((X_flat.shape[0], 1))))
@@ -148,13 +148,13 @@ def loss_fn(params, u_input, y_reconstruction, aperture, beta_1=0,beta_2=0, wash
     key = random.PRNGKey(0)
     x_init = None if washout == 0 else random.uniform(
         key, shape=(params['w'].shape[0],))
-    YX = jax.vmap(forward_esn, (None, None, 0, 0, None, None, None))(
+    YX = jax.vmap(forward_rnn, (None, None, 0, 0, None, None, None))(
         params, None, u_input, idx, x_init, True, False)
 
     X = YX[:, :, u_input.shape[2]:]
-    y_esn = YX[:, :, :u_input.shape[2]]
+    y_rnn = YX[:, :, :u_input.shape[2]]
     error_per_sample = np.sum(
-        (y_esn[:, washout:, :] - y_reconstruction[:, washout:, :]) ** 2, axis=2)
+        (y_rnn[:, washout:, :] - y_reconstruction[:, washout:, :]) ** 2, axis=2)
     error_per_sample = np.mean(error_per_sample, axis=1)
 
     # get conceptor
