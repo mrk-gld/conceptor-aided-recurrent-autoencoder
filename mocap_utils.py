@@ -29,4 +29,4 @@ def get_mocap_data(folder, dataset_names):
         datasets.append(data_sets_norm[i][-min_len:])
         datasets_no_norm.append(data_sets[i][-min_len:])
         
-    return np.array(datasets), np.array(datasets_no_norm)
+    return np.array(datasets), np.array(datasets_no_norm), data_mean, data_std

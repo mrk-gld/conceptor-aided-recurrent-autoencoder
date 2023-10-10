@@ -35,7 +35,9 @@ flags.DEFINE_float("learning_rate", 1e-3, "learning rate")
 flags.DEFINE_float("clip_grad", 1e-2, "gradient clipping norm value")
 
 flags.DEFINE_integer("seed", 42, "seed for random number generators")
-flags.DEFINE_float("conceptor_loss_amp", 1/50, "conceptor loss amplitude")
+flags.DEFINE_float("beta_1", 1/50, "conceptor loss amplitude")
+flags.DEFINE_float("beta_2", 0.1, "conceptor loss amplitude")
+flags.DEFINE_float("aperture", 10, "aperture of the conceptor")
 
 
 def main(_):
@@ -43,7 +45,7 @@ def main(_):
     # load data
     folder = "motion_data_numpy/"
     dataset_names = ["walk_15", "run_55"]
-    datasets, _ = get_mocap_data(folder, dataset_names)
+    datasets, _,_,_ = get_mocap_data(folder, dataset_names)
     
     data_sample = np.array([0, -1])
     ut_train = datasets[data_sample, 0:datasets.shape[1]-1, :]
@@ -73,9 +75,10 @@ def main(_):
                                                                      opt_update,
                                                                      get_params,
                                                                      epoch_idx,
-                                                                     aperture=10.,
+                                                                     aperture=FLAGS.aperture,
                                                                      washout=FLAGS.washout,
-                                                                     conceptor_loss_amp=FLAGS.conceptor_loss_amp)
+                                                                     beta_1=FLAGS.beta_1,
+                                                                     beta_2=FLAGS.beta_2)
 
         # log losses to tensorboard
         tb_writer.add_scalar("loss", loss.item(), epoch_idx)

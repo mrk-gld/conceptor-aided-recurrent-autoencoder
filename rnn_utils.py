@@ -141,7 +141,7 @@ def initialize_wout(params, ut, yt, reg_wout=10, washout=0):
     return params, X_flat, Y_flat
 
 
-def loss_fn(params, u_input, y_reconstruction, aperture, conceptor_loss_amp=0, washout=0):
+def loss_fn(params, u_input, y_reconstruction, aperture, beta_1=0,beta_2=0, washout=0):
     idx = np.array([0, 1])
     from jax import random
     # forward pass
@@ -171,16 +171,22 @@ def loss_fn(params, u_input, y_reconstruction, aperture, conceptor_loss_amp=0, w
     Er_c = np.linalg.norm(C[0]-C[1])
     Er_mean = np.linalg.norm(M[0]-M[1])
 
-    return np.mean(error_per_sample) + conceptor_loss_amp * (Er_c + 0*Er_mean/10) + 0.01*np.linalg.norm(params['wout']**2) + 0.01*np.linalg.norm(params['w']**2), (Er_c, Er_mean, error_per_sample, X)
+    return np.mean(error_per_sample) + beta_1 * Er_c + beta_2* Er_mean + 0.01*np.linalg.norm(params['wout']**2) + 0.01*np.linalg.norm(params['w']**2), (Er_c, Er_mean, error_per_sample, X)
 
 
 @functools.partial(jax.jit, static_argnums=(4, 5, 9, 10))
-def update(params, u_input, y_reconstruction, opt_state, opt_update, get_params, epoch_idx, aperture, conceptor_loss_amp=0, washout=0):
+def update(params, u_input, y_reconstruction, opt_state, opt_update, get_params, epoch_idx, aperture, beta_1=0,beta_2=0, washout=0):
 
     params = get_params(opt_state)
 
     (loss, tuple_encoding), grads = jax.value_and_grad(
-        loss_fn, has_aux=True)(params, u_input, y_reconstruction, aperture, conceptor_loss_amp, washout)
+        loss_fn, has_aux=True)(params,
+                               u_input, 
+                               y_reconstruction, 
+                               aperture, 
+                               beta_1,
+                               beta_2,
+                               washout)
     er_c, er_mean, er_y, X = tuple_encoding
 
     nrm = jax.tree_map(
