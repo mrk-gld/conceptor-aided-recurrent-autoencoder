@@ -1,7 +1,7 @@
 import os
 from tqdm import tqdm
 from absl import flags, app
-
+import optax
 import jax
 import jax.numpy as np
 from jax.example_libraries import optimizers as jax_opt
@@ -41,7 +41,9 @@ flags.DEFINE_float("learning_rate", 1e-3, "learning rate")
 flags.DEFINE_float("clip_grad", 1e-2, "gradient clipping norm value")
 
 flags.DEFINE_integer("seed", 42, "seed for random number generators")
-flags.DEFINE_float("conceptor_loss_amp", 1/50, "conceptor loss amplitude")
+flags.DEFINE_float("beta_1", 0.02, "conceptor loss amplitude")
+flags.DEFINE_float("beta_2", 0.01, "conceptor loss amplitude")
+flags.DEFINE_float("aperture", 10, "aperture of the conceptor")
 
 
 def main(_):
@@ -68,27 +70,32 @@ def main(_):
     params_rnn, _, _ = initialize_wout(
         params_ini.copy(), ut_train, yt_train, reg_wout=10)
  
-    opt_init, opt_update, get_params = jax_opt.adam(FLAGS.learning_rate)
-    opt_state = opt_init(params_rnn.copy())
+    optimizer = optax.chain(
+        optax.clip(FLAGS.clip_grad),
+        optax.adam(learning_rate=FLAGS.learning_rate)
+    )
+
+    opt_state = optimizer.init(params_rnn)
+    opt_update = optimizer.update
 
     for epoch_idx in tqdm(range(FLAGS.num_epochs)):
 
-        opt_state, loss, er_c, er_mean, er_y, X, grads_norm = update(params_rnn,
-                                                                     ut_train,
-                                                                     yt_train,
-                                                                     opt_state,
-                                                                     opt_update,
-                                                                     get_params,
-                                                                     epoch_idx,
-                                                                     aperture=10.,
-                                                                     washout=FLAGS.washout,
-                                                                     conceptor_loss_amp=FLAGS.conceptor_loss_amp)
+        params_rnn, opt_state, loss, err_c, err_c_mean, err_mse, X, grads_norm = update(params_rnn,
+                                                                                    ut_train,
+                                                                                    yt_train,
+                                                                                    opt_state,
+                                                                                    opt_update,
+                                                                                    aperture=FLAGS.aperture,
+                                                                                    washout=FLAGS.washout,
+                                                                                    beta_1=FLAGS.beta_1,
+                                                                                    beta_2=FLAGS.beta_2
+                                                                                    )
 
         # log losses to tensorboard
         tb_writer.add_scalar("loss", loss.item(), epoch_idx)
-        tb_writer.add_scalar("loss_c", er_c.item(), epoch_idx)
-        tb_writer.add_scalar("loss_c_mean", er_mean.item(), epoch_idx)
-        tb_writer.add_scalar("loss_rec", np.mean(er_y).item(), epoch_idx)
+        tb_writer.add_scalar("loss_c", err_c.item(), epoch_idx)
+        tb_writer.add_scalar("loss_c_mean", err_c_mean.item(), epoch_idx)
+        tb_writer.add_scalar("loss_rec", np.mean(err_mse).item(), epoch_idx)
         tb_writer.add_scalar("grads_norm", grads_norm[0].item(), epoch_idx)
 
         if epoch_idx % FLAGS.steps_per_eval == 0:
@@ -99,15 +106,14 @@ def main(_):
             C = jax.vmap(
                 lambda U, S: U*(S/(S+0.001*np.ones(S.shape)))@U.T, (0, 0))(U, S)
 
-            params = get_params(opt_state)
-            visualize_sine_interpolation(params, C,
+            visualize_sine_interpolation(params_rnn, C,
                                     ut_train,
                                     log_folder,
                                     f"{epoch_idx:03}")
 
             # save params
             np.savez(f"{log_folder}/ckpt/params_{epoch_idx+1:03}.npz", **{
-                key: params[key].__array__() for key in params.keys()
+                key: params_rnn[key].__array__() for key in params_rnn.keys()
             })
 
             conceptor = {"C_1": C[0], "C_2": C[1]}
