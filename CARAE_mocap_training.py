@@ -11,14 +11,14 @@ from numpy import Inf, NaN
 
 from torch.utils.tensorboard import SummaryWriter
 
-from rnn_utils import update
-from rnn_utils import rnn_params
-from rnn_utils import initialize_wout
+from utils.rnn_utils import update
+from utils.rnn_utils import rnn_params
+from utils.rnn_utils import initialize_wout
 
-from utils import setup_logging_directory
-from utils import visualize_mocap_interpolation
+from utils.utils import setup_logging_directory
+from utils.utils import visualize_sine_interpolation
 
-from mocap_utils import get_mocap_data
+from utils.mocap_utils import get_mocap_data
 
 # define flags
 FLAGS = flags.FLAGS

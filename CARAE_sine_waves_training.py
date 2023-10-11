@@ -8,12 +8,12 @@ from jax.example_libraries import optimizers as jax_opt
 
 from numpy import Inf, NaN
 
-from rnn_utils import update
-from rnn_utils import rnn_params
-from rnn_utils import initialize_wout
+from utils.rnn_utils import update
+from utils.rnn_utils import rnn_params
+from utils.rnn_utils import initialize_wout
 
-from utils import setup_logging_directory
-from utils import visualize_sine_interpolation
+from utils.utils import setup_logging_directory
+from utils.utils import visualize_sine_interpolation
 
 from torch.utils.tensorboard import SummaryWriter
 

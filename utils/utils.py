@@ -4,7 +4,7 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 
-from rnn_utils import forward_rnn_interp
+from utils.rnn_utils import forward_rnn_interp
 
 def setup_logging_directory(logdir, name):
     """Create a new logging directory with the given name, or use the next available index."""

@@ -214,7 +214,7 @@ def loss_fn(params, u_input, y_reconstruction, aperture, beta_1=0, beta_2=0, was
     err_c = np.linalg.norm(C[0]-C[1])
     err_c_mean = np.linalg.norm(M[0]-M[1])
     ridge = np.linalg.norm(params['wout']**2) + np.linalg.norm(params['w']**2)
-    loss = err_mse + beta_1 * err_c + beta_2 * err_c_mean + 0.01 * ridge
+    loss = err_mse + beta_1 * err_c + beta_2 * err_c_mean #+ 0.01 * ridge
 
     return loss, (err_c, err_c_mean, error_per_sample, X)
 
