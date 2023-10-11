@@ -1,5 +1,6 @@
 #ignore log folder
 logs/
+videos/
 .vscode/
 *.mp4
 *.pyc

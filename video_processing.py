@@ -105,18 +105,11 @@ def video_generation(joint_coordinate_arr, c_joints, out_path = 'simple_animatio
     plt.close('all')
     
     
-def convert_motion_data_to_video(datasets,data_mean,data_std,labels):
+def convert_motion_data_to_video(folder, datasets, data_mean, data_std,labels):
     
     # unnormalize the data
     for i, data in enumerate(datasets):
         datasets[i] = data*data_std + data_mean
-
-    data_concat = npy.concatenate(datasets, axis=0)
-
-    scaler = MinMaxScaler(feature_range=(-1, 1))
-
-    scaler = MinMaxScaler(feature_range=(-1, 1))
-    # data_concat_sc_sh = scaler.fit_transform(data_concat)
     
     #check if all data sets have the same length
     len_data = [len(data) for data in datasets]
@@ -133,7 +126,12 @@ def convert_motion_data_to_video(datasets,data_mean,data_std,labels):
     norm_ij = np.load('motion_data_numpy/norm_ij.npy')
 
     ## video of the behavior
-    # data_interp_unsc = scaler.inverse_transform(data_interpolated)
+    video_dir = os.path.join(folder,"videos")
+    os.makedirs(video_dir, exist_ok=True)
+    files = []
     for i, data in enumerate(datasets):
         joint_coordinate_arr = angle2Coordinate(data, data_ini_walk, c_joints, norm_ij)
-        video_generation(joint_coordinate_arr, c_joints, out_path = f'./{labels[i]}.mp4', display = "treadmill")
+        video_file = os.path.join(video_dir, f'{labels[i]}.mp4')
+        video_generation(joint_coordinate_arr, c_joints, out_path = video_file, display = "treadmill")
+        files.append(video_file)
+    return files
