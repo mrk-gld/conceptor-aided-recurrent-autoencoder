@@ -11,6 +11,7 @@ from numpy import Inf, NaN
 from utils.rnn_utils import update
 from utils.rnn_utils import rnn_params
 from utils.rnn_utils import initialize_wout
+from utils.rnn_utils import compute_conceptor
 
 from utils.utils import setup_logging_directory
 from utils.utils import visualize_sine_interpolation
@@ -50,7 +51,7 @@ def main(_):
 
     t_pattern = 300
     datasets = jax.vmap(sine_wave, in_axes=(None, 0))(
-        t_pattern, np.linspace(0.5, 3, 10))
+        t_pattern, np.linspace(1, 3, 10))
     datasets = np.expand_dims(datasets, axis=2)
 
     data_sample = np.array([0, -1])
@@ -62,6 +63,8 @@ def main(_):
     os.makedirs(os.path.join(log_folder, 'ckpt'), exist_ok=True)
     os.makedirs(os.path.join(log_folder, 'plots'), exist_ok=True)
 
+    with open(os.path.join(log_folder, 'flags.txt'), 'w') as f:
+        f.write(FLAGS.flags_into_string())
 
     input_size = ut_train.shape[-1]
     output_size = yt_train.shape[-1]
@@ -69,7 +72,7 @@ def main(_):
 
     params_rnn, _, _ = initialize_wout(
         params_ini.copy(), ut_train, yt_train, reg_wout=10)
- 
+
     optimizer = optax.chain(
         optax.clip(FLAGS.clip_grad),
         optax.adam(learning_rate=FLAGS.learning_rate)
@@ -80,36 +83,31 @@ def main(_):
 
     for epoch_idx in tqdm(range(FLAGS.num_epochs)):
 
-        params_rnn, opt_state, loss, err_c, err_c_mean, err_mse, X, grads_norm = update(params_rnn,
-                                                                                    ut_train,
-                                                                                    yt_train,
-                                                                                    opt_state,
-                                                                                    opt_update,
-                                                                                    aperture=FLAGS.aperture,
-                                                                                    washout=FLAGS.washout,
-                                                                                    beta_1=FLAGS.beta_1,
-                                                                                    beta_2=FLAGS.beta_2
-                                                                                    )
+        params_rnn, opt_state, X, info = update(params_rnn,
+                                                ut_train,
+                                                yt_train,
+                                                opt_state,
+                                                opt_update,
+                                                aperture=FLAGS.aperture,
+                                                washout=FLAGS.washout,
+                                                beta_1=FLAGS.beta_1,
+                                                beta_2=FLAGS.beta_2
+                                                )
 
         # log losses to tensorboard
-        tb_writer.add_scalar("loss", loss.item(), epoch_idx)
-        tb_writer.add_scalar("loss_c", err_c.item(), epoch_idx)
-        tb_writer.add_scalar("loss_c_mean", err_c_mean.item(), epoch_idx)
-        tb_writer.add_scalar("loss_rec", np.mean(err_mse).item(), epoch_idx)
-        tb_writer.add_scalar("grads_norm", grads_norm[0].item(), epoch_idx)
+        tb_writer.add_scalar("loss", info['loss'].item(), epoch_idx)
+        tb_writer.add_scalar("loss_c", info['err_c'].item(), epoch_idx)
+        tb_writer.add_scalar("loss_c_mean", info['err_c_mean'].item(), epoch_idx)
+        tb_writer.add_scalar("loss_rec", np.mean(info['err_mse']).item(), epoch_idx)
+        tb_writer.add_scalar("grads_norm", info['grads_norm'][0].item(), epoch_idx)
 
         if epoch_idx % FLAGS.steps_per_eval == 0:
-            R = jax.vmap(
-                lambda X: np.dot(X.T, X)/X.shape[0], (0))(X[:, FLAGS.washout:, :])
-            U, S, V = jax.vmap(
-                lambda R: np.linalg.svd(R, full_matrices=False, hermitian=True), (0))(R)
-            C = jax.vmap(
-                lambda U, S: U*(S/(S+0.001*np.ones(S.shape)))@U.T, (0, 0))(U, S)
+            C = jax.vmap(lambda x: compute_conceptor(x, FLAGS.aperture,svd=True))(X[:,FLAGS.washout:,:])
 
-            visualize_sine_interpolation(params_rnn, C,
-                                    ut_train,
-                                    log_folder,
-                                    f"{epoch_idx:03}")
+            visualize_sine_interpolation(params_rnn, 
+                                         C,
+                                        log_folder,
+                                        f"{epoch_idx:03}")
 
             # save params
             np.savez(f"{log_folder}/ckpt/params_{epoch_idx+1:03}.npz", **{

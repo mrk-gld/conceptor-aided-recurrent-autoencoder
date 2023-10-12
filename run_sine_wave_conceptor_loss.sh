@@ -5,5 +5,5 @@ python CARAE_sine_waves_training.py \
     --rnn_size=512 \
     --learning_rate=1e-3 \
     --beta_1=0.02 \
-    --beta_2=0.0 \
+    --beta_2=0.002 \
     --aperture=10

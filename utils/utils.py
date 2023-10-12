@@ -1,13 +1,18 @@
 import os
-import numpy as np
 import jax.numpy as jnp
+import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 
 from utils.rnn_utils import forward_rnn_interp
 
 def setup_logging_directory(logdir, name):
-    """Create a new logging directory with the given name, or use the next available index."""
+    """
+    Create a new logging directory with the given name, or use the next available index.
+    
+    Returns:
+    - directory of the created log folder
+    """
     if not os.path.exists(f"{logdir}/{name}"):
         log_folder = f"{logdir}/{name}"
     else:
@@ -17,30 +22,38 @@ def setup_logging_directory(logdir, name):
         log_folder = f"{logdir}/{name}_{last_idx}"
     return log_folder
 
-def visualize_sine_interpolation(params, C, ut_train, log_folder, filename):
+def visualize_sine_interpolation(params, conceptors, log_folder, filename, len_seqs = 300):
+    """
+    Visualizes the interpolation of a sine wave using a recurrent neural network.
 
-    len_seqs = 200
+    Args:
+    - params: dictionary containing the parameters of the RNN
+    - conceptors: dictionary containing the conceptors of the RNN
+    - log_folder: string representing the path to the log folder
+    - filename: string representing the name of the file to save the plot
+    - len_seqs: integer representing the length of the sequence to interpolate
 
+    Returns:
+    - None
+    """
     plt.figure()
     # compute how the system interpolate
-    for lamda in [0, 0.5, 1]:
+    for lamda in [0, 0.25,0.5,0.75, 1]:
         # t_interp = 100
-        t_interp = jnp.ones(len_seqs)*lamda
-        ut_interp = jnp.zeros(len_seqs)
-        YX_interpolation = forward_rnn_interp(
-            params, C, ut_interp, None, t_interp=t_interp)
+        lambda_t = jnp.ones(len_seqs)*lamda
+        x_interp, y_interp = forward_rnn_interp(
+            params, conceptors, None, lambda_t)
 
-        X_interp = YX_interpolation[:, ut_train.shape[2]:]
-        y_rnn_interp = YX_interpolation[:, :ut_train.shape[2]]
+        plt.plot(y_interp, label=r"$\lambda=${}".format(lamda))
 
-        plt.plot(y_rnn_interp)
-
+    plt.legend(frameon=False)
+    plt.ylabel("y(k)")
+    plt.xlabel("k")
     plt.savefig(f'{log_folder}/plots/interpolation_{filename}.png')
     plt.close()
-    pass
 
 
-def visualize_mocap_interpolation(params, c_matrix, ut_train, log_folder, filename):
+def visualize_mocap_interpolation(params, conceptors, log_folder, filename):
     """
     Visualize the interpolation of the motion capture data using the Echo State Network.
 
@@ -59,13 +72,11 @@ def visualize_mocap_interpolation(params, c_matrix, ut_train, log_folder, filena
     states = []
     lamdas = [0, 0.25, 0.5, 0.75, 1]
     for lamda in lamdas:
-        t_interp = jnp.ones(len_seqs) * lamda
-        ut_interp = jnp.zeros(len_seqs)
-        yx_interpolation = forward_rnn_interp(
-            params, c_matrix, ut_interp, None, t_interp=t_interp)
+        lambda_t = jnp.ones(len_seqs) * lamda
+        x_interp, y_interp = forward_rnn_interp(
+            params, conceptors, None, lambda_t=lambda_t)
 
-        x_interpolation = yx_interpolation[:, ut_train.shape[2]:]
-        states.append(x_interpolation)
+        states.append(x_interp)
 
     states_conca = jnp.concatenate(states, axis=0)
     pca = PCA(n_components=2)
@@ -75,8 +86,10 @@ def visualize_mocap_interpolation(params, c_matrix, ut_train, log_folder, filena
     ax = fig.add_subplot(111, projection='3d')
     for lamda, state in zip(lamdas, states):
         data_pca = pca.transform(state)
-        ax.plot(data_pca[:, 0], data_pca[:, 1], lamda)
+        ax.plot(data_pca[:, 0], data_pca[:, 1], lamda,label=r"$\lambda$={}".format(lamda))
 
+    plt.legend()
     plt.tight_layout()
     plt.savefig(f'{log_folder}/plots/interpolation_{filename}.png')
     plt.close()
+    
