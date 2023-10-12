@@ -1,31 +1,13 @@
-import os, sys
+import os,sys
+import numpy as np
 
 sys.path.append('AMCParser')
 import amc_parser as amc
 
-from pathlib import Path
-import numpy as np
 import matplotlib.pyplot as plt
-import pandas as pd
-from mpl_toolkits.mplot3d import Axes3D
-import transforms3d 
 from matplotlib.animation import FuncAnimation
-import numpy as npy
-import numpy as np
-import matplotlib.pyplot as plt
-from scipy import linalg 
-from typing import NamedTuple, Callable, Optional
 
-import functools
-from sklearn.decomposition import PCA
-
-from mpl_toolkits.mplot3d import Axes3D
-import transforms3d 
-
-from sklearn.preprocessing import MinMaxScaler
-from numpy import Inf, NaN
-
-from skeleton import angle2Coordinate
+from utils.skeleton import angle2Coordinate
 
 def rotate_translate_frame(points, rotation, translation_hrz):
     # translate to put back at origin and rotate to be in the local frame
@@ -51,7 +33,8 @@ def vector2d_angles(v1, v2):
     return np.arctan2(cross, dot)
 
 
-def video_generation(joint_coordinate_arr, c_joints, out_path = 'simple_animation.gif', display = "normal"): # type: normal, treadmill, circle
+def video_generation(joint_coordinate_arr, c_joints, out_path = 'simple_animation.gif', display = "normal"): 
+    # type: normal, treadmill, circle
     fig = plt.figure(figsize=(10, 10))
     # ax = Axes3D(fig)
     ax = fig.add_subplot(111, projection="3d")
@@ -132,6 +115,6 @@ def convert_motion_data_to_video(folder, datasets, data_mean, data_std,labels):
     for i, data in enumerate(datasets):
         joint_coordinate_arr = angle2Coordinate(data, data_ini_walk, c_joints, norm_ij)
         video_file = os.path.join(video_dir, f'{labels[i]}.mp4')
-        video_generation(joint_coordinate_arr, c_joints, out_path = video_file, display = "treadmill")
+        video_generation(joint_coordinate_arr, c_joints, out_path=video_file, display = "treadmill")
         files.append(video_file)
     return files

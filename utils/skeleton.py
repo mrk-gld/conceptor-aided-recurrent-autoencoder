@@ -6,13 +6,13 @@ import matplotlib.pyplot as plt
 import transforms3d 
 
 def rotate_translate_frame(points, rotation, translation_hrz):
-  # translate to put back at origin and rotate to be in the local frame
-  points_rot_transl = rotation.dot(points - translation_hrz)
-  return points_rot_transl
+    # translate to put back at origin and rotate to be in the local frame
+    points_rot_transl = rotation.dot(points - translation_hrz)
+    return points_rot_transl
 
 def inv_rotate_translate_frame(points, rotation, translation_hrz):
-  points_rot_transl = rotation.T.dot(points) + translation_hrz  
-  return points_rot_transl
+    points_rot_transl = rotation.T.dot(points) + translation_hrz  
+    return points_rot_transl
 
 def angle2Coordinate(data, data_ini, c_joints, norm_ij):
     dec_delta = data[:, 0:1]
