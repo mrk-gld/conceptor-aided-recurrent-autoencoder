@@ -1,0 +1,1 @@
+rsync -avz p302922@login2.hb.hpc.rug.nl:carae/logs ./logs_remote

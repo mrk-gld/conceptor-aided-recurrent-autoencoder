@@ -1,0 +1,43 @@
+{
+        // Use IntelliSense to learn about possible attributes.
+        // Hover to view descriptions of existing attributes.
+        // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+        "version": "0.2.0",
+        "configurations": [
+            {
+                "name": "Python: Current File",
+                "type": "python",
+                "request": "launch",
+                "program": "${file}",
+                "console": "integratedTerminal",
+                "justMyCode": true
+            },
+            {
+                "name": "debug rnn3d",
+                "type": "python",
+                "request": "launch",
+                "program": "conceptor_aided_recurrent_autoencoder_robot_human.py",
+                "console": "integratedTerminal",
+                "justMyCode": false,
+                "purpose": [
+                    "debug-in-terminal"
+                ],
+                "cwd": "/home/guillaumep/conceptor-aided-recurrent-autoencoder",
+                "args": [
+                    "--name=human_robot_pp_dense_wout",
+                    "--conceptor_loss_amp=0.02",
+                    "--num_epochs=600",
+                    "--steps_per_eval=25",
+                    "--a_dt=0.01",
+                    "--data=robot_human_data_pp_dense.npy",
+                    "--mlp_size_hidden=[1024,1024,1024]",
+                    "--steps_per_eval=100",
+                    "--learning_rate=0.001",
+                    "--num_epochs=100000",
+                    "--mlp_in_out=[[8],[8]]"
+                ]
+    
+            },
+    
+        ]
+    }

@@ -11,7 +11,7 @@ from jax import Array
 from jax.example_libraries import optimizers as jax_opt
 
 
-# RNN helpers (test)
+# RNN helpers
 
 def esn_params(input_scaling, esn_size, spectral_radius, a_dt, bias_scaling=0.8, seed=1235):
     input_size = 1
@@ -42,8 +42,7 @@ def esn3d_params(input_scaling, esn_size, data_size, spectral_radius, a_dt, mlp_
         w *= spectral_radius / current_spectral_radius
         return w
     params = dict(
-         bias=prng.normal(size=(esn_size,))*bias_scaling, bias_out=prng.normal(size=(output_size,))*bias_scaling,
-         a_dt = a_dt*np.ones(esn_size))
+         bias=prng.normal(size=(esn_size,))*bias_scaling, bias_out=prng.normal(size=(output_size,))*bias_scaling)
 
     # params['wout0'] = prng.normal(size=(output_size, mlp_size_hidden[0]))
     # params['wout1'] = prng.normal(size=(output_size, mlp_size_hidden[0]))
@@ -59,6 +58,8 @@ def esn3d_params(input_scaling, esn_size, data_size, spectral_radius, a_dt, mlp_
     params['x_ini1']= npy.array([-.5,0.01,0.01])#0.1*prng.normal(size=(esn_size))#B_bias[1]#C_bias @ (params['x_ini'][1,0] - B_bias[1]) + B_bias[1]
     params['bias_out0'] = prng.normal(size=(output_size,))*bias_scaling
     params['bias_out1'] = prng.normal(size=(output_size,))*bias_scaling
+    params['a_dt0'] = a_dt*np.ones(esn_size)
+    params['a_dt1'] = a_dt*np.ones(esn_size)
 
 
     # cool initialization for being in the right subspace
@@ -160,7 +161,7 @@ def forward_esn_interp(params, C_manifold, ut, x_init, t_interp):
     return YX
 
 # the one with mixing
-def forward_esn3d(params, C_bias, B_bias, ut, idx, x_init = None, encoding = True, biased = False, sep = True, y_init = None, noise = 0.):
+def forward_esn3d(params, C_bias, B_bias, ut, idx, x_init = None, encoding = True, biased = False, sep = True, y_init = None, noise = 0., stab = 0):
     """
     Compute the forward pass for each example individually.
     :param params: parameters of the ESN
@@ -173,6 +174,7 @@ def forward_esn3d(params, C_bias, B_bias, ut, idx, x_init = None, encoding = Tru
     :param sep: whether to mix the weights or not
     :param y_init: initial output of the reservoir
     :param inp_mix: whether to mix the input with the state in the MLP or not
+    :stab: stabilize the RNN with: 0 
     """
 
 
@@ -195,6 +197,7 @@ def forward_esn3d(params, C_bias, B_bias, ut, idx, x_init = None, encoding = Tru
         bias_eff = (1-interp_para)*params['bias0'] + interp_para*params['bias1'] 
         bias_out_eff = (1-interp_para)*params['bias_out0'] + interp_para*params['bias_out1'] 
         # w_exp_eff = (1-interp_para)*params['expension0'] + interp_para*params['expension1']
+        a_dt_eff = (1-interp_para)*params['a_dt0'] + interp_para*params['a_dt1']
 
 
         
@@ -202,7 +205,7 @@ def forward_esn3d(params, C_bias, B_bias, ut, idx, x_init = None, encoding = Tru
             x_in = mlp_eff_in_out(params, interp_para, ut, "in", win_eff, bias_eff)[0]          
             x_tanh = np.dot(w_eff, x) + x_in
             x_tanh, x_exp = mlp_eff(params, interp_para, x_tanh)
-            x = (1-params["a_dt"])*x + params["a_dt"]*np.tanh(
+            x = (1-a_dt_eff)*x + a_dt_eff*np.tanh(
                     x_tanh)
             return x, x_exp
 
@@ -210,26 +213,23 @@ def forward_esn3d(params, C_bias, B_bias, ut, idx, x_init = None, encoding = Tru
             x_in = mlp_eff_in_out(params, interp_para, y, "in", win_eff, bias_eff)[0]
             x_tanh = np.dot(w_eff, x) + x_in
             x_tanh, x_exp = mlp_eff(params, interp_para, x_tanh)
-            x = (1-params["a_dt"])*x + params["a_dt"]*np.tanh(
+            x = (1-a_dt_eff)*x + a_dt_eff*np.tanh(
                 x_tanh)
             return x, x_exp
 
 
-        
-
-        x, x_exp = jax.lax.cond(encoding, encode, decode,
-            params, ut, x, y, interp_para
-        )
-        # x = np.tanh(x) # still required?
-
         # add a little bit of noise to the state and the input
-        # noise along x is directly cancelled
-        x, _ = jax.lax.cond(
-            encoding,
+        x, ut = jax.lax.cond(
+            encoding and (stab==0),
             lambda x: (x[0] + noise*npy.random.randn(*x[0].shape), x[1] + noise*npy.random.randn(*x[1].shape)),
             lambda x: x,
             (x, ut)
         )
+        x, x_exp = jax.lax.cond(encoding, encode, decode,
+            params, ut, x, y, interp_para
+        )
+        # x = np.tanh(x) # still required?
+        
         # project
         x = np.dot(C_bias, x-B_bias) + B_bias #+ np.clip(x-B_bias, -0.01, 0.01)
         # x = B_bias
@@ -480,32 +480,27 @@ def loss_fn3d(params, u_input, y_reconstruction, encoding, C_bias, B_bias, noise
     error_per_sample = np.mean(error_per_sample, axis = 1)
     
 
-    # error_jcb = np.mean(df**2, axis =3)
-    # error_jcb = np.mean(error_jcb, axis = 2)
+    # error_jcb = np.mean(df**2, axis =(3,2))
     # error_jcb = np.mean(error_jcb, axis = 1)
     # error_jcb = np.mean(error_jcb, axis = 0)
 
     # run in decoding mode
-    def forcing(params, u_input, y_reconstruction, idx, C_bias, B_bias, noise, y_esn):
-        # stop grad
-        y_esn = jax.lax.stop_gradient(y_esn)
+    def forcing(params, u_input, y_reconstruction, idx, C_bias, B_bias, noise):
         encoding = False
         y_esn_dec, X_dec, _ = jax.vmap(forward_esn3d, (None,None,0,0,0,None,None,None, None, None, None))(
         params, C_bias, B_bias, u_input, idx, None, encoding, False, True, None, noise)
 
         # compute loss between hidden states
-        #error_state_per_sample = np.sum((X_dec - X) ** 2, axis = 2) + np.sum((y_esn_dec - y_esn) ** 2, axis = 2)
-        error_state_per_sample = np.sum((y_esn_dec - y_esn) ** 2, axis = 2)
-        error_state_per_sample = np.where(error_state_per_sample < 0.005**2, error_state_per_sample, np.zeros_like(error_state_per_sample))
-
+        error_state_per_sample = np.sum((X_dec - X) ** 2, axis = 2)
         error_state_per_sample = np.mean(error_state_per_sample, axis = 1)
         Er_state = np.mean(error_state_per_sample, axis = 0)
         return Er_state
-    Er_state = jax.lax.cond(
+
+    Er_stab = jax.lax.cond(
         p_forcing,
-        lambda params, u_input, y_reconstruction, idx, C_bias, B_bias, noise, y_esn: forcing(params, u_input, y_reconstruction, idx, C_bias, B_bias, noise, y_esn),
-        lambda params, u_input, y_reconstruction, idx, C_bias, B_bias, noise, y_esn: 0.,
-        params, u_input, y_reconstruction, idx, C_bias, B_bias, noise, y_esn
+        lambda params, u_input, y_reconstruction, idx, C_bias, B_bias, noise: forcing(params, u_input, y_reconstruction, idx, C_bias, B_bias, noise),
+        lambda params, u_input, y_reconstruction, idx, C_bias, B_bias, noise: 0.,
+        params, u_input, y_reconstruction, idx, C_bias, B_bias, noise
     )
 
     Er_c = 0#np.linalg.norm(C[0]-C[1]) 
@@ -513,7 +508,7 @@ def loss_fn3d(params, u_input, y_reconstruction, encoding, C_bias, B_bias, noise
     # Er_conceptor
     # Er_c = 0
     # Er_c = jax.vmap(lambda x, c, b: np.mean(np.linalg.norm((x - b) @ c - (x-b),axis =1)), (0, None, 0))(X, C_bias, B_bias)
-    return np.mean(error_per_sample)+np.mean(Er_c) + Er_state/10000, (Er_c, Er_state, error_per_sample, X, y_esn)
+    return np.mean(error_per_sample)+np.mean(Er_c) + Er_stab/5000, (Er_c, Er_stab, error_per_sample, X, y_esn)
 
 @functools.partial(jax.jit, static_argnums=(4, 5, 7, 8, 9))
 def update(params, u_input, y_reconstruction, opt_state, opt_update, get_params, epoch_idx, aperture, conceptor_loss_amp=0, washout=0):
