@@ -223,8 +223,8 @@ def forward_esn3d(params, C_bias, B_bias, ut, idx, x_init = None, encoding = Tru
         # x = np.tanh(x) # still required?
 
         # add a little bit of noise to the state and the input
-        # noise along x is directly cancelled
-        x, _ = jax.lax.cond(
+        # noise along x-axis is directly cancelled
+        _, ut = jax.lax.cond(
             encoding,
             lambda x: (x[0] + noise*npy.random.randn(*x[0].shape), x[1] + noise*npy.random.randn(*x[1].shape)),
             lambda x: x,
@@ -681,3 +681,22 @@ def affine_conceptor(x_shift):
 
     C_bias = U @ S @ U.T
     return C_bias, B_bias
+
+# create a jupyter cell
+#%%
+fig = plt.figure()
+ax = fig.gca(projection='3d')
+
+x, y, z = np.meshgrid(np.arange(-0.8, 1, 0.2),
+                      np.arange(-0.8, 1, 0.2),
+                      np.arange(-0.8, 1, 0.8))
+
+u = np.sin(np.pi * x) * np.cos(np.pi * y) * np.cos(np.pi * z)
+v = -np.cos(np.pi * x) * np.sin(np.pi * y) * np.cos(np.pi * z)
+w = (np.sqrt(2.0 / 3.0) * np.cos(np.pi * x) * np.cos(np.pi * y) *
+     np.sin(np.pi * z))
+
+ax.quiver(x, y, z, u, v, w, length=0.1, color = 'black')
+
+plt.show()
+# %%
