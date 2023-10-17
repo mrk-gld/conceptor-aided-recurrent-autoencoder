@@ -421,7 +421,7 @@ def initialize_wout3d(params, C_bias, B_bias, ut, yt, reg_wout=10, washout=0):
 
     # Record input driven dyna
     Y, X, X_exp = jax.vmap(forward_esn3d, (None,None, 0, 0, 0, None, None, None))(
-        params, C_bias, B_bias, ut, idx, None, True, False)
+        params, C_bias, B_bias, ut, idx, None, True, True)
 
     X_flat = X_exp.reshape(-1, X_exp.shape[-1])
     X_flat_bias = np.hstack((X_flat, np.ones((X_flat.shape[0], 1))))
@@ -470,7 +470,7 @@ def loss_fn(params, u_input, y_reconstruction, aperture, conceptor_loss_amp=0, w
 def loss_fn3d(params, u_input, y_reconstruction, encoding, C_bias, B_bias, noise, p_forcing = True):
     idx = np.array([0, 1])
     y_esn, X, X_exp = jax.vmap(forward_esn3d, (None,None,0,0,0,None,None,None, None, None, None))(
-        params, C_bias, B_bias, u_input, idx, None, encoding, False, True, None, noise)
+        params, C_bias, B_bias, u_input, idx, None, encoding, True, True, None, noise)
 
     # YX = YX_df[0]
     # df = YX_df[1]
@@ -682,21 +682,3 @@ def affine_conceptor(x_shift):
     C_bias = U @ S @ U.T
     return C_bias, B_bias
 
-# create a jupyter cell
-#%%
-fig = plt.figure()
-ax = fig.gca(projection='3d')
-
-x, y, z = np.meshgrid(np.arange(-0.8, 1, 0.2),
-                      np.arange(-0.8, 1, 0.2),
-                      np.arange(-0.8, 1, 0.8))
-
-u = np.sin(np.pi * x) * np.cos(np.pi * y) * np.cos(np.pi * z)
-v = -np.cos(np.pi * x) * np.sin(np.pi * y) * np.cos(np.pi * z)
-w = (np.sqrt(2.0 / 3.0) * np.cos(np.pi * x) * np.cos(np.pi * y) *
-     np.sin(np.pi * z))
-
-ax.quiver(x, y, z, u, v, w, length=0.1, color = 'black')
-
-plt.show()
-# %%
