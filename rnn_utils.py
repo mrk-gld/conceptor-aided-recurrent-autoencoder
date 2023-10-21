@@ -160,7 +160,102 @@ def forward_esn_interp(params, C_manifold, ut, x_init, t_interp):
     return YX
 
 # the one with mixing
-def forward_esn3d(params, C_bias, B_bias, ut, idx, x_init = None, encoding = True, biased = False, sep = True, y_init = None, noise = 0.):
+# def forward_esn3d(params, C_bias, B_bias, ut, idx, x_init = None, encoding = True, biased = False, sep = True, y_init = None, noise = 0.):
+#     """
+#     Compute the forward pass for each example individually.
+#     :param params: parameters of the ESN
+#     :param C_bottleneck: conceptor matrix
+#     :param ut: input (T, K)
+#     :param idx: index of the ESN
+#     :param x_init: initial state of the reservoir
+#     :param encoding: whether to encode or decode
+#     :param biased: whether to use conceptor to bias the state
+#     :param sep: whether to mix the weights or not
+#     :param y_init: initial output of the reservoir
+#     :param inp_mix: whether to mix the input with the state in the MLP or not
+#     """
+
+
+#     # u_clock can be used both for clock and for input (for initialization)
+#     if x_init is None:
+#         interp_para = idx
+#         x_init = (1-interp_para)*params['x_ini0'] + interp_para*params['x_ini1']
+#     if y_init is None:
+#         y_init = ut[1]
+#     def apply_fun_scan(params, encoding, C_bias, B_bias, xy, ut):
+
+#         x, y = xy 
+#         if sep:
+#             interp_para = idx
+#         else:
+#             interp_para = (x[0]+0.5)
+#         w_eff = (1-interp_para)*params['w0'] + interp_para*params['w1']
+#         win_eff = (1-interp_para)*params['win0'] + interp_para*params['win1']
+#         wout_eff = (1-interp_para)*params['wout0'] + interp_para*params['wout1'] 
+#         bias_eff = (1-interp_para)*params['bias0'] + interp_para*params['bias1'] 
+#         bias_out_eff = (1-interp_para)*params['bias_out0'] + interp_para*params['bias_out1'] 
+#         # w_exp_eff = (1-interp_para)*params['expension0'] + interp_para*params['expension1']
+
+
+        
+#         def encode(params, ut, x, y, interp_para):
+#             x_in = mlp_eff_in_out(params, interp_para, ut, "in", win_eff, bias_eff)[0]          
+#             x_tanh = np.dot(w_eff, x) + x_in
+#             x_tanh, x_exp = mlp_eff(params, interp_para, x_tanh)
+#             x = (1-params["a_dt"])*x + params["a_dt"]*np.tanh(
+#                     x_tanh)
+#             return x, x_exp
+
+#         def decode(params, ut, x, y, interp_para):
+#             x_in = mlp_eff_in_out(params, interp_para, y, "in", win_eff, bias_eff)[0]
+#             x_tanh = np.dot(w_eff, x) + x_in
+#             x_tanh, x_exp = mlp_eff(params, interp_para, x_tanh)
+#             x = (1-params["a_dt"])*x + params["a_dt"]*np.tanh(
+#                 x_tanh)
+#             return x, x_exp
+
+
+        
+
+#         x, x_exp = jax.lax.cond(encoding, encode, decode,
+#             params, ut, x, y, interp_para
+#         )
+#         # x = np.tanh(x) # still required?
+
+#         # add a little bit of noise to the state and the input
+#         # noise along x-axis is directly cancelled
+#         _, ut = jax.lax.cond(
+#             encoding,
+#             lambda x: (x[0] + noise*npy.random.randn(*x[0].shape), x[1] + noise*npy.random.randn(*x[1].shape)),
+#             lambda x: x,
+#             (x, ut)
+#         )
+#         # project
+#         x = np.dot(C_bias, x-B_bias) + B_bias #+ np.clip(x-B_bias, -0.01, 0.01)
+#         # x = B_bias
+#         # x = np.dot(C_bias, x)
+#         # x = jax.lax.cond(
+#         #     False,
+#         #     lambda x: x,
+#         #     lambda x: np.dot(C_bias, x-B_bias) + B_bias,
+#         #     x
+#         # )
+        
+#         y = mlp_eff_in_out(params, interp_para, x, "out", wout_eff, bias_out_eff)[0]
+
+#         xy = (x,y)
+
+#         return xy, (y,x,x_exp)
+
+#     f = functools.partial(apply_fun_scan, params)
+#     f = functools.partial(f, encoding) 
+#     f = functools.partial(f, C_bias)
+#     f = functools.partial(f, B_bias)
+#     xy = (x_init, y_init)
+#     _, YX = jax.lax.scan(f, xy, ut)
+#     return YX
+
+def forward_esn3d(params, C_bias, B_bias, ut, idx, x_init = None, encoding = True, biased = False, sep = True, y_init = None, noise = 0., interp_range=0.5, interp=False, interp_range_mixing=0.5):
     """
     Compute the forward pass for each example individually.
     :param params: parameters of the ESN
@@ -182,13 +277,22 @@ def forward_esn3d(params, C_bias, B_bias, ut, idx, x_init = None, encoding = Tru
         x_init = (1-interp_para)*params['x_ini0'] + interp_para*params['x_ini1']
     if y_init is None:
         y_init = ut[1]
-    def apply_fun_scan(params, encoding, C_bias, B_bias, xy, ut):
 
-        x, y = xy 
-        if sep:
-            interp_para = idx
-        else:
-            interp_para = (x[0]+0.5)
+    if interp:
+        interp_time = ut.shape[0]
+    def apply_fun_scan(params, encoding, interp_range, interp_range_mixing, interp, sep, C_bias, B_bias, xyc, ut):
+
+        x, y, count = xyc
+        interp_para = jax.lax.cond(
+            sep,
+            lambda idx, x0, interp_range: idx.astype(float),
+            lambda idx, x0, interp_range: x0+interp_range_mixing,
+            idx, x[0], interp_range_mixing
+        )
+        # if sep:
+        #     interp_para = idx
+        # else:
+        #     interp_para = (x[0]+interp)
         w_eff = (1-interp_para)*params['w0'] + interp_para*params['w1']
         win_eff = (1-interp_para)*params['win0'] + interp_para*params['win1']
         wout_eff = (1-interp_para)*params['wout0'] + interp_para*params['wout1'] 
@@ -215,23 +319,30 @@ def forward_esn3d(params, C_bias, B_bias, ut, idx, x_init = None, encoding = Tru
             return x, x_exp
 
 
-        
 
         x, x_exp = jax.lax.cond(encoding, encode, decode,
             params, ut, x, y, interp_para
         )
         # x = np.tanh(x) # still required?
 
-        # add a little bit of noise to the state and the input
-        # noise along x-axis is directly cancelled
-        _, ut = jax.lax.cond(
-            encoding,
-            lambda x: (x[0] + noise*npy.random.randn(*x[0].shape), x[1] + noise*npy.random.randn(*x[1].shape)),
-            lambda x: x,
-            (x, ut)
-        )
+        # # add a little bit of noise to the state and the input
+        # # noise along x-axis is directly cancelled
+        # _, ut = jax.lax.cond(
+        #     encoding,
+        #     lambda x: (x[0] + noise*npy.random.randn(*x[0].shape), x[1] + noise*npy.random.randn(*x[1].shape)),
+        #     lambda x: x,
+        #     (x, ut)
+        # )
         # project
-        x = np.dot(C_bias, x-B_bias) + B_bias #+ np.clip(x-B_bias, -0.01, 0.01)
+        if interp:
+            interp_ini = -interp_range
+            interp_end = interp_range
+            interp_gap = interp_end - interp_ini
+            affine_interp_para = interp_ini + count * interp_gap/interp_time
+            B_bias = np.array([affine_interp_para, 0, 0])
+
+        if biased:
+            x = np.dot(C_bias, x-B_bias) + B_bias #+ np.clip(x-B_bias, -0.01, 0.01)
         # x = B_bias
         # x = np.dot(C_bias, x)
         # x = jax.lax.cond(
@@ -243,17 +354,22 @@ def forward_esn3d(params, C_bias, B_bias, ut, idx, x_init = None, encoding = Tru
         
         y = mlp_eff_in_out(params, interp_para, x, "out", wout_eff, bias_out_eff)[0]
 
-        xy = (x,y)
+        xyc = (x,y, count+1)
 
-        return xy, (y,x,x_exp)
+        return xyc, (y,x,x_exp)
 
     f = functools.partial(apply_fun_scan, params)
     f = functools.partial(f, encoding) 
+    f = functools.partial(f, interp_range)
+    f = functools.partial(f, interp_range_mixing)
+    f = functools.partial(f, interp)
+    f = functools.partial(f, sep)
     f = functools.partial(f, C_bias)
     f = functools.partial(f, B_bias)
-    xy = (x_init, y_init)
-    _, YX = jax.lax.scan(f, xy, ut)
-    return YX
+    xyc = (x_init, y_init, 0)
+    _, YX = jax.lax.scan(f, xyc, ut)
+    return YX    
+
 
 def mlp(params, in_array, pos):
     """ Compute the forward pass for each example individually """
@@ -467,10 +583,10 @@ def loss_fn(params, u_input, y_reconstruction, aperture, conceptor_loss_amp=0, w
 
     return np.mean(error_per_sample) + conceptor_loss_amp * (Er_c + 0*Er_mean/10) + 0.01*np.linalg.norm(params['wout']**2) + 0.01*np.linalg.norm(params['w']**2), (Er_c, Er_mean, error_per_sample, X)
 
-def loss_fn3d(params, u_input, y_reconstruction, encoding, C_bias, B_bias, noise, p_forcing = True):
+def loss_fn3d(params, u_input, y_reconstruction, encoding, C_bias, B_bias, noise, p_forcing = False, sep = False, interp_range = 0.5, interp_range_mixing =0.5):
     idx = np.array([0, 1])
-    y_esn, X, X_exp = jax.vmap(forward_esn3d, (None,None,0,0,0,None,None,None, None, None, None))(
-        params, C_bias, B_bias, u_input, idx, None, encoding, True, True, None, noise)
+    y_esn, X, X_exp = jax.vmap(forward_esn3d, (None,None,0,0,0,None,None,None, None, None, None, None, None, None))(
+        params, C_bias, B_bias, u_input, idx, None, encoding, True, sep, None, noise, interp_range, False,interp_range_mixing)
 
     # YX = YX_df[0]
     # df = YX_df[1]
@@ -545,11 +661,11 @@ def update(params, u_input, y_reconstruction, opt_state, opt_update, get_params,
     opt_state = opt_update(epoch_idx, grads, opt_state)
     return opt_state, loss, er_c, er_mean, er_y, X, grads_norm
 
-@functools.partial(jax.jit, static_argnums=(3, 4, 6))
-def update3d(u_input, y_reconstruction, opt_state, opt_update, get_params, epoch_idx, encoding, C_bias, B_bias, noise, p_forcing):
+@functools.partial(jax.jit, static_argnums=(3, 4, 6, 9, 10, 11, 12, 13))
+def update3d(u_input, y_reconstruction, opt_state, opt_update, get_params, epoch_idx, encoding, C_bias, B_bias, noise, p_forcing, sep, interp_range, interp_range_mixing):
     params = get_params(opt_state)
 
-    (loss, tuple_encoding), grads = jax.value_and_grad(loss_fn3d, has_aux = True)(params, u_input, y_reconstruction, encoding, C_bias, B_bias, noise, p_forcing)
+    (loss, tuple_encoding), grads = jax.value_and_grad(loss_fn3d, has_aux = True)(params, u_input, y_reconstruction, encoding, C_bias, B_bias, noise, p_forcing, sep, interp_range, interp_range_mixing)
     er_c, er_mean, er_y, X, y_esn = tuple_encoding
 
     # clip gradient
@@ -603,6 +719,9 @@ def visualize_interpolation(params, C, ut_train, log_folder, filename):
     plt.savefig(f'{log_folder}/plots/interpolation_{filename}.png')
     plt.close()
 
+
+
+
 def visualize_decoding(params, idx, C_bias, B_bias, ut_train, log_folder, filename):
 
     
@@ -624,6 +743,7 @@ def visualize_decoding(params, idx, C_bias, B_bias, ut_train, log_folder, filena
     plt.savefig(f'{log_folder}/plots/auto3d_{filename}.png')
     plt.close()
 
+
     plt.figure()
     for i in range(3):
         plt.plot(X_auto[0,:,i], label = f'robot_{i}')
@@ -631,6 +751,140 @@ def visualize_decoding(params, idx, C_bias, B_bias, ut_train, log_folder, filena
     plt.legend()
     plt.savefig(f'{log_folder}/plots/auto_2d{filename}.png')
     plt.close() 
+
+
+def visualize_decoding_interp(params, idx, C_bias, B_bias, log_folder, filename, interp=True, vector_field=True, interp_range = 0.5, t_auto=500, t_interp= 1000):
+
+    
+    # compute the system autonomously
+    ut_train = np.zeros((2,t_auto,2))
+    y_esn_auto, X_auto, X_exp = jax.vmap(forward_esn3d,(None, None,0,0,0,None,None,None,None,None))(
+        params, C_bias, B_bias, ut_train, idx, None, False, True, False, None)
+    
+    # plot the system autonomously
+    plt.figure()
+    plt.plot(y_esn_auto[0, :, 0], y_esn_auto[0, :, 1], 'r', label = 'robot')
+    plt.plot(y_esn_auto[1, :, 0], y_esn_auto[1, :, 1], 'g', label = 'human')
+    plt.legend()          
+    plt.savefig(f'{log_folder}/plots/auto_{filename}.png')
+    plt.close()
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    ax.plot(X_auto[0,:,0], X_auto[0,:,1], X_auto[0,:,2], 'r', label = 'robot')
+    ax.plot(X_auto[1,:,0], X_auto[1,:,1], X_auto[1,:,2], 'g', label = 'human')
+    plt.legend()
+    plt.savefig(f'{log_folder}/plots/auto3d_{filename}.png')
+    plt.close()
+
+    # get the bounds
+    bound_auto = []
+    for i in range(2):
+        plt.figure()
+        plt.plot(X_auto[i,:,1], X_auto[i,:,2], 'r', label = 'robot')
+        plt.legend()
+        x_min, x_max = plt.xlim()
+        y_min, y_max = plt.ylim()
+        bound_auto.append([x_min, x_max, y_min, y_max])  
+        plt.close()
+
+    plt.figure()
+    for i in range(2):
+        plt.plot(X_auto[i,:,1], X_auto[i,:,2], 'r')
+    plt.savefig(f'{log_folder}/plots/auto3d_proj{filename}.png')
+    plt.close()
+
+    plt.figure()
+    for i in range(3):
+        plt.plot(X_auto[0,:,i], label = f'robot_{i}')
+        plt.plot(X_auto[1,:,i], label = f'human_{i}')
+    plt.legend()
+    plt.savefig(f'{log_folder}/plots/auto_2d{filename}.png')
+    plt.close() 
+    
+    if interp:
+        ut_train = np.zeros((2,t_interp,2))
+        # compute the interpolation
+        y_esn_interp, X_interp, _ = forward_esn3d(
+            params, C_bias, B_bias[0], ut_train[0], idx[0], None, False, True, False, None, 0., interp_range, True)
+
+        # plot the interpolation
+        plt.figure()
+        plt.plot(y_esn_interp[ :, 0], y_esn_interp[:, 1], 'r', label = 'robot')
+        plt.legend()   
+        plt.savefig(f'{log_folder}/plots/interp_{filename}.png')    
+        plt.close()
+
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+        ax.plot(X_interp[:,0], X_interp[:,1], X_interp[:,2], 'r', label = 'robot')
+        plt.legend()
+        plt.savefig(f'{log_folder}/plots/interp3d_{filename}.png')
+        plt.close()
+
+        plt.figure()
+        for i in range(3):
+            plt.plot(X_interp[:,i], label = f'robot_{i}')
+        plt.legend()
+        plt.savefig(f'{log_folder}/plots/interp_2d{filename}.png')
+        plt.close()
+    
+    if vector_field:
+        def df_discrete(params):
+            def f(x, biased=False, interp_para=None, interp=0.5):
+                # interp_para force the interpolation of para
+                interp_para = (x[0]+interp)
+                w_eff = (1-interp_para)*params['w0'] + interp_para*params['w1']
+                win_eff = (1-interp_para)*params['win0'] + interp_para*params['win1']
+                wout_eff = (1-interp_para)*params['wout0'] + interp_para*params['wout1'] 
+                bias_eff = (1-interp_para)*params['bias0'] + interp_para*params['bias1'] 
+                bias_out_eff = (1-interp_para)*params['bias_out0'] + interp_para*params['bias_out1'] 
+
+                # not really true, would need the weight of the previous step
+                y = mlp_eff_in_out(params, interp_para, x, "out", wout_eff, bias_out_eff)[0]
+
+                x_in = mlp_eff_in_out(params, interp_para, y, "in", win_eff, bias_eff)[0]
+                x_tanh = np.dot(w_eff, x) + x_in
+                x_tanh, x_exp = mlp_eff(params, interp_para, x_tanh)
+                x_updated = (1-params["a_dt"])*x + params["a_dt"]*np.tanh(
+                    x_tanh)
+
+                dx = x_updated-x
+                if biased:
+                    dx = dx.at[0].set(0.)
+                return dx
+            return f
+        df = df_discrete(params)
+        x, y, z = np.meshgrid(np.linspace(-interp_range,+interp_range,3),
+                  np.arange(-1, 1, 0.05),
+                  np.arange(-1, 1, 0.05), indexing='ij')
+        data_mesh = np.stack([x, y, z], axis = -1)
+        df_mesh = jax.vmap(jax.vmap(jax.vmap(df)))(data_mesh)
+        df_mesh = np.moveaxis(df_mesh, -1, 0)
+        
+        for z_idx in [0,int(z.shape[2]/2),-1]:
+            plt.figure(figsize=(10,10))
+            plt.quiver(x[:,:,z_idx], y[:,:,z_idx], df_mesh[0,:,:,z_idx], df_mesh[1,:,:,z_idx], color = 'black', scale = 1)
+            plt.title(f'z = {z[0,0,z_idx]}')
+            # add legend axis
+            plt.xlabel('x')
+            plt.ylabel('y')
+            plt.savefig(f'{log_folder}/plots/vector_field_{filename}_z{z[0,0,z_idx]}.png')
+            plt.close() 
+        
+        x_idx  = [0,2]
+        color = ['r', 'g']
+        for i in range(2):
+            plt.figure(figsize=(10,10))
+            plt.quiver(y[x_idx[i]], z[x_idx[i]], df_mesh[1,x_idx[i]], df_mesh[2,x_idx[i]],scale=3, color = 'black')
+            plt.plot(X_auto[i,:,1], X_auto[i,:,2], color=color[i], label = 'robot')
+            plt.xlabel('y')
+            plt.ylabel('z')
+            plt.xlim(bound_auto[i][:2])
+            plt.ylim(bound_auto[i][2:])
+            plt.savefig(f'{log_folder}/plots/vector_field2d_{filename}_x{x[x_idx[i],0,0]}.png')
+            plt.close()
+
 
 def visualize_data(X, y_esn, log_folder, filename):
     plt.figure()
@@ -655,7 +909,12 @@ def visualize_data(X, y_esn, log_folder, filename):
     plt.legend()
     plt.savefig(f'{log_folder}/plots/input_2d{filename}.png')
     plt.close() 
-
+    
+    plt.figure()
+    for i in range(2):
+        plt.plot(X[i,:,1], X[i,:,2], 'r')
+    plt.savefig(f'{log_folder}/plots/input3d_proj{filename}.png')
+    plt.close()
 
 # Conceptor helper
 

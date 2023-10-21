@@ -12,7 +12,7 @@ from rnn_utils import update
 # from rnn_utils import esn_params
 # from rnn_utils import initialize_wout
 from rnn_utils import visualize_interpolation
-from rnn_utils import esn3d_params, initialize_wout3d, update3d, affine_conceptor, visualize_decoding, visualize_data
+from rnn_utils import esn3d_params, initialize_wout3d, update3d, affine_conceptor, visualize_decoding_interp, visualize_data
 import shutil
 
 from torch.utils.tensorboard import SummaryWriter
@@ -53,7 +53,9 @@ flags.DEFINE_string("data", "robot_human_data.npy", "data file")
 flags.DEFINE_float("a_dt", 0.1, "leakage para of the esn")
 flags.DEFINE_bool("p_forcing", True, "forcing probability")
 flags.DEFINE_string("loading", "None", "whether to load a checkpoint")
-
+flags.DEFINE_bool("sep", False, "enforce separation of weights")
+flags.DEFINE_float("interp_range", 0.5, "range of interpolation")
+flags.DEFINE_float("interp_range_mixing", 0.5, "range of mixing the parameters")
 
 def main(_):
 
@@ -78,16 +80,16 @@ def main(_):
         f.write(FLAGS.flags_into_string())
 
     if FLAGS.loading == "None":
-        params_ini = esn3d_params(1., 3, 2, 1., FLAGS.a_dt, eval(FLAGS.mlp_size_hidden), eval(FLAGS.mlp_in_out), 0.8, seed=FLAGS.seed)
+        params_esn = esn3d_params(1., 3, 2, 1., FLAGS.a_dt, eval(FLAGS.mlp_size_hidden), eval(FLAGS.mlp_in_out), 0.8, seed=FLAGS.seed)
     else:
-        params_ini = np.load(FLAGS.loading)
-        params_ini = {key: params_ini[key] for key in params_ini.keys()}
+        params_esn = np.load(FLAGS.loading)
+        params_esn = {key: params_esn[key] for key in params_esn.keys()}
     
     # get the affine conceptor
-    C_bias, B_bias = affine_conceptor(0.5)
+    C_bias, B_bias = affine_conceptor(FLAGS.interp_range)
 
-    params_esn, _, _ = initialize_wout3d(
-        params_ini, C_bias, B_bias, ut_train, yt_train, reg_wout=10)
+    # params_esn, _, _ = initialize_wout3d(
+    #     params_esn, C_bias, B_bias, ut_train, yt_train, reg_wout=10)
 
     opt_init, opt_update, get_params = jax_opt.adam(FLAGS.learning_rate)
     opt_state = opt_init(params_esn.copy())
@@ -112,7 +114,10 @@ def main(_):
                                                                      C_bias = C_bias,
                                                                      B_bias = B_bias,
                                                                      noise=FLAGS.noise,
-                                                                     p_forcing=p_forcing)
+                                                                     p_forcing=p_forcing,
+                                                                     sep = FLAGS.sep,
+                                                                     interp_range=FLAGS.interp_range,
+                                                                     interp_range_mixing=FLAGS.interp_range_mixing,)
 
         # log losses to tensorboard
         tb_writer.add_scalar("loss", loss.item(), epoch_idx)
@@ -127,10 +132,9 @@ def main(_):
 
             idx = np.array([0, 1])
             params = get_params(opt_state)
-            visualize_decoding(params, idx, C_bias, B_bias,
-                                    ut_train,
+            visualize_decoding_interp(params, idx, C_bias, B_bias,
                                     log_folder,
-                                    f"{epoch_idx:03}")
+                                    f"{epoch_idx:03}", interp=True, vector_field=True, interp_range=FLAGS.interp_range)
             # visualize_interpolation3d(params, C)
 
             # save params
