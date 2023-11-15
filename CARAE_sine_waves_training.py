@@ -1,12 +1,10 @@
 import os
+from functools import partial
 from tqdm import tqdm
 from absl import flags, app
 import optax
 import jax
 import jax.numpy as np
-from jax.example_libraries import optimizers as jax_opt
-
-from numpy import Inf, NaN
 
 from utils.rnn_utils import update
 from utils.rnn_utils import rnn_params
@@ -21,8 +19,10 @@ from torch.utils.tensorboard import SummaryWriter
 # define flags
 FLAGS = flags.FLAGS
 
-# linear interpolation between sine waves of different frequencies (parametrisation of similar to Wyffels et al. (2014))
+
 def sine_wave(t_pattern, s):
+    """linear interpolation between sine waves of different frequencies
+    (parametrisation of similar to Wyffels et al. (2014))"""
     signal = []
     for i in range(t_pattern):
         signal.append(np.sin(0.075*s*i))
@@ -47,8 +47,7 @@ flags.DEFINE_float("beta_2", 0.01, "conceptor loss amplitude")
 flags.DEFINE_float("aperture", 10, "aperture of the conceptor")
 
 
-def main(_):
-
+def main():
     t_pattern = 300
     datasets = jax.vmap(sine_wave, in_axes=(None, 0))(
         t_pattern, np.linspace(1, 3, 10))
@@ -68,7 +67,7 @@ def main(_):
 
     input_size = ut_train.shape[-1]
     output_size = yt_train.shape[-1]
-    params_ini = rnn_params(512,input_size,output_size,1., 1., 0.1, 0.8, seed=21)
+    params_ini = rnn_params(512, input_size, output_size, 1., 1., 0.1, 0.8, seed=21)
 
     params_rnn, _, _ = initialize_wout(
         params_ini.copy(), ut_train, yt_train, reg_wout=10)
@@ -102,12 +101,10 @@ def main(_):
         tb_writer.add_scalar("grads_norm", info['grads_norm'][0].item(), epoch_idx)
 
         if epoch_idx % FLAGS.steps_per_eval == 0:
-            C = jax.vmap(lambda x: compute_conceptor(x, FLAGS.aperture,svd=True))(X[:,FLAGS.washout:,:])
+            f_partial = partial(compute_conceptor, aperture=FLAGS.aperture, svd=True)
+            C = jax.vmap(f_partial)(X[:, FLAGS.washout:, :])
 
-            visualize_sine_interpolation(params_rnn, 
-                                         C,
-                                        log_folder,
-                                        f"{epoch_idx:03}")
+            visualize_sine_interpolation(params_rnn, C, log_folder, f"{epoch_idx:03}")
 
             # save params
             np.savez(f"{log_folder}/ckpt/params_{epoch_idx+1:03}.npz", **{
