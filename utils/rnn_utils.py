@@ -127,8 +127,8 @@ def forward_rnn(params, conceptor, ut, x_init=None, autoregressive=False):
     return yx
 
 
-@jit
-def forward_rnn_interp(params, C_manifold, x_init, lambda_t):
+@functools.partial(jax.jit, static_argnums=(3, 4, 5))
+def forward_rnn_interp(params, C_manifold, x_init, ratio=0.5, length=100, spd_interp=None):
     """
     Computes the autoregressive mode forward pass of a recurrent neural network (RNN) with
     interpolated parameters.

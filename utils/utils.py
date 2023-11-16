@@ -2,11 +2,12 @@ import os
 import jax.numpy as jnp
 import numpy as np
 import matplotlib.pyplot as plt
-# from sklearn.decomposition import PCA
+from sklearn.decomposition import PCA
 
 from utils.rnn_utils import forward_rnn_interp as forward_rnn_interp_rnn
 from utils.lstm_utils import forward_rnn_interp as forward_rnn_interp_lstm
 
+from utils.rnn_utils import forward_rnn_interp
 
 def setup_logging_directory(logdir, name):
     """
@@ -101,10 +102,10 @@ def compute_JS_divergence_and_acf(timeseries1, timeseries2, timeseries_interp, l
     def compute_autocorrelation(x1):
         acf_full = []
         x1 = np.array(x1)
-        for q in range(x1.shape[0]):
+        for q in range(x1.shape[1]):
             acf = []
             for i in range(1,lag):
-                acf.append(np.corrcoef(x1[q,:-i], x1[q,i:])[0,1])
+                acf.append(np.corrcoef(x1[:-i,q], x1[i:,q])[0,1])
             acf_full.append(np.abs(acf))
         return np.array(acf_full)
     
@@ -116,11 +117,17 @@ def compute_JS_divergence_and_acf(timeseries1, timeseries2, timeseries_interp, l
         return 0.5 * (kl_divergence(P, M) + kl_divergence(Q, M))
     
     if timeseries1.ndim == 1:
-        timeseries1 = timeseries1.reshape(1,-1)
+        timeseries1 = timeseries1.reshape(-1,1)
     if timeseries2.ndim == 1:
-        timeseries2 = timeseries2.reshape(1,-1)
+        timeseries2 = timeseries2.reshape(-1,1)
     if timeseries_interp.ndim == 1:
-        timeseries_interp = timeseries_interp.reshape(1,-1)
+        timeseries_interp = timeseries_interp.reshape(-1,1)
+        
+    # resize all timeseries to the same length
+    min_len = np.min([timeseries1.shape[0], timeseries2.shape[0], timeseries_interp.shape[0]])
+    timeseries1 = timeseries1[-min_len:,:]
+    timeseries2 = timeseries2[-min_len:,:]
+    timeseries_interp = timeseries_interp[-min_len:,:]
     
     max_val = np.max([timeseries1.max(), timeseries2.max()])
     min_val = np.min([timeseries1.min(), timeseries2.min()])
@@ -130,10 +137,10 @@ def compute_JS_divergence_and_acf(timeseries1, timeseries2, timeseries_interp, l
     jsd_1_curr = []
     jsd_2_curr = []        
     
-    for p in range(timeseries1.shape[0]):
-        prob1 = np.histogram(timeseries1[p], bins=bins, density=True)[0] + 1e-18
-        prob2 = np.histogram(timeseries2[p], bins=bins, density=True)[0] + 1e-18
-        prob_interp = np.histogram(timeseries_interp[p], bins=bins, density=True)[0] + 1e-18
+    for p in range(timeseries1.shape[1]):
+        prob1 = np.histogram(timeseries1[:,p], bins=bins, density=True)[0] + 1e-18
+        prob2 = np.histogram(timeseries2[:,p], bins=bins, density=True)[0] + 1e-18
+        prob_interp = np.histogram(timeseries_interp[:,p], bins=bins, density=True)[0] + 1e-18
 
         prob1 = prob1/np.sum(prob1)
         prob2 = prob2/np.sum(prob2)
@@ -157,10 +164,6 @@ def compute_JS_divergence_and_acf(timeseries1, timeseries2, timeseries_interp, l
     acf_1 = compute_autocorrelation(timeseries1)
     acf_2 = compute_autocorrelation(timeseries2)
     acf_interp = compute_autocorrelation(timeseries_interp)
-    
-    acf_interp[~np.isnan(acf_interp)] = 0
-    acf_1[~np.isnan(acf_1)] = 0
-    acf_2[~np.isnan(acf_2)] = 0
     
     # compute the difference in autocorrelation
     acf_diff_1 = np.abs(acf_1 - acf_interp)
