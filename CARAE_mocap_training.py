@@ -12,9 +12,12 @@ from utils.rnn_utils import update
 from utils.rnn_utils import rnn_params
 from utils.rnn_utils import initialize_wout
 from utils.rnn_utils import compute_conceptor
+from utils.rnn_utils import forward_rnn_interp
 
 from utils.utils import setup_logging_directory
 from utils.utils import visualize_mocap_interpolation
+from utils.utils import visualize_sine_interpolation
+from utils.utils import compute_JS_divergence_and_acf
 
 
 from utils.mocap_utils import get_mocap_data
@@ -39,6 +42,8 @@ flags.DEFINE_float("beta_1", 0.02, "conceptor loss amplitude")
 flags.DEFINE_float("beta_2", 0.1, "conceptor loss amplitude")
 flags.DEFINE_float("aperture", 10, "aperture of the conceptor")
 
+flags.DEFINE_bool("plot_interp", True, "plot interpolation between mocap motions")
+flags.DEFINE_bool("calc_metric", True, "calculate metric for interpolation")
 
 def main(_):
 
@@ -61,8 +66,12 @@ def main(_):
     
     input_size = ut_train.shape[-1]
     output_size = yt_train.shape[-1]
-    params_ini = rnn_params(FLAGS.rnn_size, input_size,
-                            output_size, 1., 1., 0.1, 0.8, seed=21)
+    
+    params_ini = rnn_params(FLAGS.rnn_size,
+                            input_size,
+                            output_size,
+                            1., 1., 0.1, 0.8,
+                            seed=FLAGS.seed)
 
     params_rnn, _, _ = initialize_wout(
         params_ini.copy(), ut_train, yt_train, reg_wout=10)
@@ -78,15 +87,15 @@ def main(_):
     for epoch_idx in tqdm(range(FLAGS.num_epochs)):
 
         params_rnn, opt_state, X, info = update(params_rnn,
-                    ut_train,
-                    yt_train,
-                    opt_state,
-                    opt_update,
-                    aperture=FLAGS.aperture,
-                    washout=FLAGS.washout,
-                    beta_1=FLAGS.beta_1,
-                    beta_2=FLAGS.beta_2
-                    )
+                                                ut_train,
+                                                yt_train,
+                                                opt_state,
+                                                opt_update,
+                                                aperture=FLAGS.aperture,
+                                                washout=FLAGS.washout,
+                                                beta_1=FLAGS.beta_1,
+                                                beta_2=FLAGS.beta_2
+                                                )
 
         # log losses to tensorboard
         tb_writer.add_scalar("loss", info['loss'].item(), epoch_idx)
@@ -98,7 +107,30 @@ def main(_):
         if epoch_idx % FLAGS.steps_per_eval == 0:
             C = jax.vmap(lambda x: compute_conceptor(x, FLAGS.aperture, svd=True))(X[:,FLAGS.washout:,:])
 
-            visualize_mocap_interpolation(params_rnn, 
+            if FLAGS.calc_metric:
+            
+                lamda = 0.5
+                len_seqs = 1000
+        
+                x_interp, y_interp = forward_rnn_interp(params_rnn,
+                                                    C,
+                                                    x_init=None,
+                                                    ratio=lamda,
+                                                    length=len_seqs,
+                                                    spd_interp=None)
+                
+                js_div1, js_div2, acf1, acf2 = compute_JS_divergence_and_acf(ut_train[0],
+                                                                            ut_train[1],
+                                                                            y_interp,
+                                                                            lag=30,
+                                                                            bins=50
+                                                                            )
+                
+                metric = 0.25 * (js_div1 + js_div2 + acf1 + acf2)
+                tb_writer.add_scalar("metric", metric, epoch_idx)
+
+            if FLAGS.plot_interp:
+                visualize_mocap_interpolation(params_rnn, 
                                           C,
                                           log_folder,
                                           f"{epoch_idx:03}")

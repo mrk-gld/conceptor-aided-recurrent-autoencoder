@@ -3,10 +3,12 @@ import jax.numpy as jnp
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
+from sklearn.decomposition import PCA
 
 from utils.rnn_utils import forward_rnn_interp as forward_rnn_interp_rnn
 from utils.lstm_utils import forward_rnn_interp as forward_rnn_interp_lstm
 
+from utils.rnn_utils import forward_rnn_interp
 
 def setup_logging_directory(logdir, name):
     """
@@ -44,9 +46,8 @@ def visualize_sine_interpolation(params, conceptors, log_folder, fname, len_seqs
     # compute how the system interpolate
     for idx, lamda in enumerate([0, 0.25, 0.5, 0.75, 1]):
         # t_interp = 100
-        lambda_t = jnp.ones(len_seqs)*lamda
         x_interp, y_interp = forward_rnn_interp(
-            params, conceptors, None, lambda_t)
+            params, conceptors, None, ratio=lamda, length=len_seqs)
 
         axs[idx].plot(y_interp, label=r"$\lambda=${}".format(lamda))
         axs[idx].legend(frameon=False)
@@ -77,9 +78,8 @@ def visualize_mocap_interpolation(params, conceptors, log_folder, filename, ntyp
     states = []
     lamdas = [0, 0.25, 0.5, 0.75, 1]
     for lamda in lamdas:
-        lambda_t = jnp.ones(len_seqs) * lamda
         x_interp, y_interp = forward_rnn_interp(
-            params, conceptors, None, lambda_t=lambda_t)
+            params, conceptors, None, ratio=lamda,length=600)
 
         states.append(x_interp)
 
@@ -97,3 +97,80 @@ def visualize_mocap_interpolation(params, conceptors, log_folder, filename, ntyp
     plt.tight_layout()
     plt.savefig(f'{log_folder}/plots/interpolation_{filename}.png')
     plt.close()
+    
+    
+def compute_JS_divergence_and_acf(timeseries1, timeseries2, timeseries_interp, lag=10, bins=50):
+    
+    def compute_autocorrelation(x1):
+        acf_full = []
+        x1 = np.array(x1)
+        for q in range(x1.shape[1]):
+            acf = []
+            for i in range(1,lag):
+                acf.append(np.corrcoef(x1[:-i,q], x1[i:,q])[0,1])
+            acf_full.append(np.abs(acf))
+        return np.array(acf_full)
+    
+    def jsd(P,Q):
+        def kl_divergence(A,B):
+            return np.sum(A * np.log2(A / B))
+        
+        M = 0.5 * (P + Q)
+        return 0.5 * (kl_divergence(P, M) + kl_divergence(Q, M))
+    
+    if timeseries1.ndim == 1:
+        timeseries1 = timeseries1.reshape(-1,1)
+    if timeseries2.ndim == 1:
+        timeseries2 = timeseries2.reshape(-1,1)
+    if timeseries_interp.ndim == 1:
+        timeseries_interp = timeseries_interp.reshape(-1,1)
+        
+    # resize all timeseries to the same length
+    min_len = np.min([timeseries1.shape[0], timeseries2.shape[0], timeseries_interp.shape[0]])
+    timeseries1 = timeseries1[-min_len:,:]
+    timeseries2 = timeseries2[-min_len:,:]
+    timeseries_interp = timeseries_interp[-min_len:,:]
+    
+    max_val = np.max([timeseries1.max(), timeseries2.max()])
+    min_val = np.min([timeseries1.min(), timeseries2.min()])
+    
+    bins = np.linspace(min_val, max_val, bins)
+    
+    jsd_1_curr = []
+    jsd_2_curr = []        
+    
+    for p in range(timeseries1.shape[1]):
+        prob1 = np.histogram(timeseries1[:,p], bins=bins, density=True)[0] + 1e-18
+        prob2 = np.histogram(timeseries2[:,p], bins=bins, density=True)[0] + 1e-18
+        prob_interp = np.histogram(timeseries_interp[:,p], bins=bins, density=True)[0] + 1e-18
+
+        prob1 = prob1/np.sum(prob1)
+        prob2 = prob2/np.sum(prob2)
+        prob_interp = prob_interp/np.sum(prob_interp)
+        
+        jsd_divergence_1 = jsd(prob1, prob_interp)
+        jsd_divergence_2 = jsd(prob2, prob_interp)
+        
+        jsd_1_curr.append(jsd_divergence_1)
+        jsd_2_curr.append(jsd_divergence_2)
+    
+    jsd_1_curr = np.array(jsd_1_curr)
+    jsd_2_curr = np.array(jsd_2_curr)
+    
+    jsd_1_curr[~np.isfinite(jsd_1_curr)] = 1
+    jsd_2_curr[~np.isfinite(jsd_2_curr)] = 1
+        
+    jsd_1 = np.mean(jsd_1_curr)
+    jsd_2 = np.mean(jsd_2_curr)
+    
+    acf_1 = compute_autocorrelation(timeseries1)
+    acf_2 = compute_autocorrelation(timeseries2)
+    acf_interp = compute_autocorrelation(timeseries_interp)
+    
+    # compute the difference in autocorrelation
+    acf_diff_1 = np.abs(acf_1 - acf_interp)
+    acf_diff_2 = np.abs(acf_2 - acf_interp)
+    acf_1 = np.mean(acf_diff_1)
+    acf_2 = np.mean(acf_diff_2)
+    
+    return jsd_1, jsd_2, acf_1, acf_2

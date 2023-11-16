@@ -10,10 +10,11 @@ from utils.rnn_utils import update
 from utils.rnn_utils import rnn_params
 from utils.rnn_utils import initialize_wout
 from utils.rnn_utils import compute_conceptor
+from utils.rnn_utils import forward_rnn_interp
 
 from utils.utils import setup_logging_directory
 from utils.utils import visualize_sine_interpolation
-
+from utils.utils import compute_JS_divergence_and_acf
 from torch.utils.tensorboard import SummaryWriter
 
 # define flags
@@ -34,7 +35,7 @@ flags.DEFINE_string("name", "sine_wave_interp",
 flags.DEFINE_string("logdir", "./logs", "path to the log directory")
 flags.DEFINE_integer("num_epochs", 3050, "number of training epochs")
 flags.DEFINE_integer("steps_per_eval", 100,
-                     "number of training steps per evaluation")
+                    "number of training steps per evaluation")
 flags.DEFINE_integer("washout", 0, "washout period")
 flags.DEFINE_integer("rnn_size", 512, "number of hidden units")
 
@@ -46,6 +47,8 @@ flags.DEFINE_float("beta_1", 0.02, "conceptor loss amplitude")
 flags.DEFINE_float("beta_2", 0.01, "conceptor loss amplitude")
 flags.DEFINE_float("aperture", 10, "aperture of the conceptor")
 
+flags.DEFINE_bool("plot_interp", True, "plot interpolation between sine waves")
+flags.DEFINE_bool("calc_metric", True, "calculate metric for interpolation")
 
 def main(_):
     t_pattern = 300
@@ -67,7 +70,11 @@ def main(_):
 
     input_size = ut_train.shape[-1]
     output_size = yt_train.shape[-1]
-    params_ini = rnn_params(512, input_size, output_size, 1., 1., 0.1, 0.8, seed=21)
+    params_ini = rnn_params(FLAGS.rnn_size,
+                            input_size,
+                            output_size,
+                            1., 1., 0.1, 0.8,
+                            seed=FLAGS.seed)
 
     params_rnn, _, _ = initialize_wout(
         params_ini.copy(), ut_train, yt_train, reg_wout=10)
@@ -100,11 +107,38 @@ def main(_):
         tb_writer.add_scalar("loss_rec", np.mean(info['err_mse']).item(), epoch_idx)
         tb_writer.add_scalar("grads_norm", info['grads_norm'][0].item(), epoch_idx)
 
+
         if epoch_idx % FLAGS.steps_per_eval == 0:
             f_partial = partial(compute_conceptor, aperture=FLAGS.aperture, svd=True)
             C = jax.vmap(f_partial)(X[:, FLAGS.washout:, :])
+            
+            if FLAGS.calc_metric:
+            
+                lamda = 0.5
+                len_seqs = 1000
+        
+                _, y_interp = forward_rnn_interp(params_rnn,
+                                                    C,
+                                                    x_init=None,
+                                                    ratio=lamda,
+                                                    length=len_seqs,
+                                                    spd_interp=None)
+                
+                js_div1, js_div2, acf1, acf2 = compute_JS_divergence_and_acf(ut_train[0],
+                                                                            ut_train[1],
+                                                                            y_interp,
+                                                                            lag=30,
+                                                                            bins=50
+                                                                            )
+                
+                metric = 0.25 * (js_div1 + js_div2 + acf1 + acf2)
+                tb_writer.add_scalar("metric", metric, epoch_idx)
 
-            visualize_sine_interpolation(params_rnn, C, log_folder, f"{epoch_idx:03}")
+            if FLAGS.plot_interp:
+                visualize_sine_interpolation(params_rnn, 
+                                        C,
+                                        log_folder,
+                                        f"{epoch_idx:03}")
 
             # save params
             np.savez(f"{log_folder}/ckpt/params_{epoch_idx+1:03}.npz", **{
