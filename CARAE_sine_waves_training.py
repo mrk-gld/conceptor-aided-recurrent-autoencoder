@@ -47,7 +47,7 @@ flags.DEFINE_float("beta_2", 0.01, "conceptor loss amplitude")
 flags.DEFINE_float("aperture", 10, "aperture of the conceptor")
 
 
-def main():
+def main(_):
     t_pattern = 300
     datasets = jax.vmap(sine_wave, in_axes=(None, 0))(
         t_pattern, np.linspace(1, 3, 10))
