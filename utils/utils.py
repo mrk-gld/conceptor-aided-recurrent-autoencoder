@@ -2,14 +2,16 @@ import os
 import jax.numpy as jnp
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.decomposition import PCA
+# from sklearn.decomposition import PCA
 
-from utils.rnn_utils import forward_rnn_interp
+from utils.rnn_utils import forward_rnn_interp as forward_rnn_interp_rnn
+from utils.lstm_utils import forward_rnn_interp as forward_rnn_interp_lstm
+
 
 def setup_logging_directory(logdir, name):
     """
     Create a new logging directory with the given name, or use the next available index.
-    
+
     Returns:
     - directory of the created log folder
     """
@@ -22,7 +24,8 @@ def setup_logging_directory(logdir, name):
         log_folder = f"{logdir}/{name}_{last_idx}"
     return log_folder
 
-def visualize_sine_interpolation(params, conceptors, log_folder, filename, len_seqs = 300):
+
+def visualize_sine_interpolation(params, conceptors, log_folder, fname, len_seqs=300, ntype='rnn'):
     """
     Visualizes the interpolation of a sine wave using a recurrent neural network.
 
@@ -36,20 +39,21 @@ def visualize_sine_interpolation(params, conceptors, log_folder, filename, len_s
     Returns:
     - None
     """
-    plt.figure()
+    forward_rnn_interp = forward_rnn_interp_rnn if ntype == 'rnn' else forward_rnn_interp_lstm
+    fig, axs = plt.subplots(5, sharex=True, sharey=True)
     # compute how the system interpolate
-    for lamda in [0, 0.25,0.5,0.75, 1]:
+    for idx, lamda in enumerate([0, 0.25, 0.5, 0.75, 1]):
         # t_interp = 100
         lambda_t = jnp.ones(len_seqs)*lamda
         x_interp, y_interp = forward_rnn_interp(
             params, conceptors, None, lambda_t)
 
-        plt.plot(y_interp, label=r"$\lambda=${}".format(lamda))
+        axs[idx].plot(y_interp, label=r"$\lambda=${}".format(lamda))
+        axs[idx].legend(frameon=False)
 
-    plt.legend(frameon=False)
-    plt.ylabel("y(k)")
-    plt.xlabel("k")
-    plt.savefig(f'{log_folder}/plots/interpolation_{filename}.png')
+    axs[idx].set_ylabel("y(k)")
+    axs[idx].set_xlabel("k")
+    plt.savefig(f'{log_folder}/plots/interpolation_{fname}.png')
     plt.close()
 
 
