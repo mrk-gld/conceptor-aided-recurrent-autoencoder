@@ -1,6 +1,6 @@
 import numpy as np
 
-def get_mocap_data(folder, dataset_names):
+def get_mocap_data(folder, dataset_names,truncate=True):
 
     data_sets = []
     data_sets_norm = []
@@ -26,7 +26,14 @@ def get_mocap_data(folder, dataset_names):
     datasets = []
     datasets_no_norm = []
     for i in range(2):
-        datasets.append(data_sets_norm[i][-min_len:])
-        datasets_no_norm.append(data_sets[i][-min_len:])
-        
-    return np.array(datasets), np.array(datasets_no_norm), data_mean, data_std
+        if truncate:
+            datasets.append(data_sets_norm[i][:min_len])
+            datasets_no_norm.append(data_sets[i][:min_len])
+        else:
+            datasets.append(data_sets_norm[i])
+            datasets_no_norm.append(data_sets[i])
+    if truncate:
+        datasets = np.array(datasets)
+        datasets_no_norm = np.array(datasets_no_norm)    
+    
+    return datasets, datasets_no_norm, data_mean, data_std

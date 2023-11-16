@@ -78,15 +78,15 @@ def main(_):
     for epoch_idx in tqdm(range(FLAGS.num_epochs)):
 
         params_rnn, opt_state, X, info = update(params_rnn,
-                    ut_train,
-                    yt_train,
-                    opt_state,
-                    opt_update,
-                    aperture=FLAGS.aperture,
-                    washout=FLAGS.washout,
-                    beta_1=FLAGS.beta_1,
-                    beta_2=FLAGS.beta_2
-                    )
+                                                ut_train,
+                                                yt_train,
+                                                opt_state,
+                                                opt_update,
+                                                aperture=FLAGS.aperture,
+                                                washout=FLAGS.washout,
+                                                beta_1=FLAGS.beta_1,
+                                                beta_2=FLAGS.beta_2
+                                                )
 
         # log losses to tensorboard
         tb_writer.add_scalar("loss", info['loss'].item(), epoch_idx)

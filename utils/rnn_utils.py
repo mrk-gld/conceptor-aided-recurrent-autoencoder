@@ -115,8 +115,8 @@ def forward_rnn(params, conceptor, ut, x_init=None, autoregressive=False):
     _, yx = jax.lax.scan(f, xy, ut)
     return yx
 
-@jit
-def forward_rnn_interp(params, C_manifold, x_init, lambda_t):
+# @jit
+def forward_rnn_interp(params, C_manifold, x_init, ratio, length, spd_interp=None):
     """
     Computes the autoregressive mode forward pass of a recurrent neural network (RNN) with interpolated parameters.
 
@@ -134,11 +134,14 @@ def forward_rnn_interp(params, C_manifold, x_init, lambda_t):
     if x_init is None:
         x_init = params["x_ini"]
 
-    def apply_fun_scan(params, xyc, ratio):
+    if spd_interp is not None:
+        C_fb = spd_interp(C_manifold[0], C_manifold[1], ratio)    
+    else:
+        C_fb = (1-ratio)*C_manifold[0] + ratio*C_manifold[1]
+
+    def apply_fun_scan(params, xyc, t):
 
         x, y, count = xyc
-
-        C_fb = (1-ratio)*C_manifold[0] + ratio*C_manifold[1]
 
         ut = params['wout'] @ x + params['bias_out']
 
@@ -153,7 +156,8 @@ def forward_rnn_interp(params, C_manifold, x_init, lambda_t):
 
     f = functools.partial(apply_fun_scan, params)
     xyc = (x_init, np.zeros(params['bias_out'].shape[0]), 0)
-    _, yx = jax.lax.scan(f, xyc, lambda_t)
+    t = np.linspace(0, 1, length)
+    _, yx = jax.lax.scan(f, xyc,t)
     
     y_rnn_interp = yx[:, :-x_init.shape[0]]
     x_rnn_interp = yx[:, -x_init.shape[0]:]

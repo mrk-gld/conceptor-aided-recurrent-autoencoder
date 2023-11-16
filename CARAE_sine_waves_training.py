@@ -34,7 +34,7 @@ flags.DEFINE_string("name", "sine_wave_interp",
 flags.DEFINE_string("logdir", "./logs", "path to the log directory")
 flags.DEFINE_integer("num_epochs", 3050, "number of training epochs")
 flags.DEFINE_integer("steps_per_eval", 100,
-                     "number of training steps per evaluation")
+                    "number of training steps per evaluation")
 flags.DEFINE_integer("washout", 0, "washout period")
 flags.DEFINE_integer("rnn_size", 512, "number of hidden units")
 
@@ -49,7 +49,7 @@ flags.DEFINE_float("aperture", 10, "aperture of the conceptor")
 
 def main(_):
 
-    t_pattern = 300
+    t_pattern = 100
     datasets = jax.vmap(sine_wave, in_axes=(None, 0))(
         t_pattern, np.linspace(1, 3, 10))
     datasets = np.expand_dims(datasets, axis=2)
@@ -105,7 +105,7 @@ def main(_):
             C = jax.vmap(lambda x: compute_conceptor(x, FLAGS.aperture,svd=True))(X[:,FLAGS.washout:,:])
 
             visualize_sine_interpolation(params_rnn, 
-                                         C,
+                                        C,
                                         log_folder,
                                         f"{epoch_idx:03}")
 
