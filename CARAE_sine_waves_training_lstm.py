@@ -7,10 +7,7 @@ import optax
 import jax
 import jax.numpy as np
 
-from utils.lstm_utils import update
-# from utils.lstm_utils import rnn_params
-# from utils.lstm_utils import initialize_wout
-from utils.lstm_utils import compute_conceptor
+from utils.lstm_utils import update, compute_conceptor
 
 from utils.utils import setup_logging_directory
 from utils.utils import visualize_sine_interpolation
@@ -44,6 +41,9 @@ flags.DEFINE_integer("seed", 42, "seed for random number generators")
 flags.DEFINE_float("beta_1", 0.02, "conceptor loss amplitude")
 flags.DEFINE_float("beta_2", 0.002, "conceptor loss amplitude")
 flags.DEFINE_float("aperture", 10, "aperture of the conceptor")
+flags.DEFINE_float("leak_rate", 0.1, "leak rate of the reservoir")
+flags.DEFINE_float("bias_scaling", 0.1, "leak rate of the reservoir")
+flags.DEFINE_bool("wout_xavier", True, "use xavier init for wout (if not, then normal)")
 
 
 def main(_):
@@ -73,27 +73,30 @@ def main(_):
     # NOTE: inp_scaling ignored (used 1.0 anyway)
     # rhoW = 1.0
     # inp_scaling = 1.0
-    a_dt = 0.1
-    bias_scaling = 0.8
+    a_dt = FLAGS.leak_rate
+    bias_scaling = FLAGS.bias_scaling
 
     key = jax.random.PRNGKey(0)
 
     lstm = nn.LSTMCell(hidden_size)
     carry = lstm.initialize_carry(key, (input_size,))
     lstm_params = lstm.init(key, carry, np.zeros((input_size,)))
+    wout_init = nn.initializers.xavier_normal() if FLAGS.wout_xavier else jax.random.normal
     params = dict(
         lstm=lstm_params,
-        wout=jax.random.normal(key, shape=(output_size, hidden_size)),
+        wout=wout_init(key, shape=(output_size, hidden_size)),
+        # wout=nn.initializers.xavier_normal()(key, shape=(output_size, hidden_size)),
+        # wout=jax.random.normal(key, shape=(output_size, hidden_size)),
         bias_out=jax.random.normal(key, shape=(output_size,)) * bias_scaling,
         a_dt=a_dt*np.ones(hidden_size),
         x_ini=0.1*jax.random.normal(key, shape=(hidden_size,)),
     )
     # params_ini = rnn_params(512, input_size, output_size, 1.0, 1.0, 0.1, 0.8, seed=21)
-
     # TODO: set wout with ridge regression?
-    # params_rnn, _, _ = initialize_wout(
-    #     params_ini.copy(), ut_train, yt_train, reg_wout=10
-    # )
+    # params_rnn, _, _ = initialize_wout(params_ini.copy(), ut_train, yt_train, reg_wout=10)
+
+    print(f'logs into {log_folder}, bias scaling {bias_scaling}, wout init {wout_init}')
+    print(f'leak rate a_dt={a_dt}')
 
     optimizer = optax.chain(
         optax.clip(FLAGS.clip_grad), optax.adam(learning_rate=FLAGS.learning_rate)
@@ -126,7 +129,8 @@ def main(_):
             f_partial = partial(compute_conceptor, aperture=FLAGS.aperture, svd=True)
             C = jax.vmap(f_partial)(X[:, FLAGS.washout:, :])
 
-            visualize_sine_interpolation(params, C, log_folder, f"{epoch_idx:03}", ntype='lstm')
+            visualize_sine_interpolation(params, C, log_folder, f"{epoch_idx:03}", ntype='lstm',
+                                         len_seqs=t_pattern)
 
             # save params
             np.save(f"{log_folder}/ckpt/params_{epoch_idx+1:03}.npz", params)

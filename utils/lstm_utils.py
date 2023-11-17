@@ -109,9 +109,8 @@ def forward_rnn(params, conceptor, ut, x_init=None, autoregressive=False):
     def apply_fun_scan(params, cxy, ut, autoregressive=False):
         c, x, y = cxy
 
-        ut = (
-            ut if not autoregressive else np.dot(params["wout"], x) + params["bias_out"]
-        )
+        if autoregressive:
+            ut = np.dot(params["wout"], x) + params["bias_out"]
 
         # TODO: handle the carry
         # x_rnn = np.tanh(params["w"] @ x + params["win"] @ ut + params["bias"])
@@ -134,8 +133,8 @@ def forward_rnn(params, conceptor, ut, x_init=None, autoregressive=False):
     return yx
 
 
-@jit
-def forward_rnn_interp(params, C_manifold, x_init, lambda_t):
+@functools.partial(jax.jit, static_argnums=(3, 4, 5))
+def forward_rnn_interp(params, C_manifold, x_init, ratio=0.5, length=100, spd_interp=None):
     """
     Computes the autoregressive mode forward pass of a recurrent neural network (RNN) with
     interpolated parameters.
@@ -153,14 +152,17 @@ def forward_rnn_interp(params, C_manifold, x_init, lambda_t):
     if x_init is None:
         x_init = params["x_ini"]
 
+    if spd_interp is not None:
+        C_fb = spd_interp(C_manifold[0], C_manifold[1], ratio)
+    else:
+        C_fb = (1-ratio)*C_manifold[0] + ratio*C_manifold[1]
+
     key = jax.random.PRNGKey(0)
     lstm = nn.LSTMCell(x_init.shape[0])
     c, _ = lstm.initialize_carry(key, x_init.shape)
 
     def apply_fun_scan(params, cxyc, ratio):
         c, x, y, count = cxyc
-
-        C_fb = (1 - ratio) * C_manifold[0] + ratio * C_manifold[1]
 
         ut = params["wout"] @ x + params["bias_out"]
 
@@ -180,7 +182,8 @@ def forward_rnn_interp(params, C_manifold, x_init, lambda_t):
 
     f = functools.partial(apply_fun_scan, params)
     cxyc = (c, x_init, np.zeros(params["bias_out"].shape[0]), 0)
-    _, yx = jax.lax.scan(f, cxyc, lambda_t)
+    t = np.linspace(0, 1, length)
+    _, yx = jax.lax.scan(f, cxyc, t)
 
     y_rnn_interp = yx[:, : -x_init.shape[0]]
     x_rnn_interp = yx[:, -x_init.shape[0]:]
