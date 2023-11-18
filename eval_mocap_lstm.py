@@ -5,7 +5,7 @@ from numpy import Inf, NaN
 import numpy as np
 
 # from utils.rnn_utils import forward_rnn_interp
-from utils.lstm_utils import forward_rnn_interp
+from utils.lstm_utils import forward_rnn_interp_old
 from utils.mocap_utils import get_mocap_data
 
 from utils.video_processing import convert_motion_data_to_video
@@ -40,9 +40,9 @@ states_lamda = []
 y_interp_lamda = []
 for lamda in lamdas:
     # TODO: use lstm version of this
-    x_interp, y_interp = forward_rnn_interp(params, c_matrix, None, length=len_seqs)
-    # lambda_t = jnp.ones(len_seqs) * lamda
-    # x_interp, y_interp = forward_rnn_interp(params, c_matrix, None, lambda_t=lambda_t)
+    # x_interp, y_interp = forward_rnn_interp(params, c_matrix, None, length=len_seqs)
+    lambda_t = jnp.ones(len_seqs) * lamda
+    x_interp, y_interp = forward_rnn_interp_old(params, c_matrix, None, lambda_t=lambda_t)
 
     states_lamda.append(x_interp)
     y_interp_lamda.append(y_interp)

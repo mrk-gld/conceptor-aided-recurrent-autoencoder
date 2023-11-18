@@ -1,12 +1,12 @@
 import functools
-# import numpy as npy
+import numpy as npy
 import optax
 import jax
 import jax.numpy as np
 from jax import random
 from jax import jit
 import flax.linen as nn
-# from jax import Array
+from jax import Array
 # import matplotlib.pyplot as plt
 # from jax.example_libraries import optimizers as jax_opt
 
@@ -133,6 +133,59 @@ def forward_rnn(params, conceptor, ut, x_init=None, autoregressive=False):
     return yx
 
 
+@jit
+def forward_rnn_interp_old(params, C_manifold, x_init, lambda_t):
+    """
+    Computes the autoregressive mode forward pass of a recurrent neural network (RNN) with
+    interpolated parameters.
+
+    Args:
+    - params (dict): dictionary containing the RNN parameters
+    - C_manifold (list): list of two matrices representing the two endpoints of the interpolation
+    - x_init (ndarray or None): initial hidden state of the RNN; if None, uses params["x_ini"]
+    - lambda_t (ndarray): array of interpolation ratios between the two endpoints of C_manifold
+
+    Returns:
+    - y_rnn_interp (ndarray):
+    - x_rnn_interp (ndarray):
+    """
+    if x_init is None:
+        x_init = params["x_ini"]
+
+    key = jax.random.PRNGKey(0)
+    lstm = nn.LSTMCell(x_init.shape[0])
+    c, _ = lstm.initialize_carry(key, x_init.shape)
+
+    def apply_fun_scan(params, cxyc, ratio):
+        c, x, y, count = cxyc
+
+        C_fb = (1 - ratio) * C_manifold[0] + ratio * C_manifold[1]
+
+        ut = params["wout"] @ x + params["bias_out"]
+
+        # x_rnn = np.tanh(params["w"] @ x + params["win"] @ ut + params["bias"])
+        (c, _), x_rnn = lstm.apply(params['lstm'], (c, x), ut)
+
+        x = C_fb @ (
+            (1 - params["a_dt"]) * x
+            + params["a_dt"] * x_rnn
+        )
+
+        y = params["wout"] @ x + params["bias_out"]
+
+        cxyc = (c, x, y, count + 1)
+
+        return cxyc, np.concatenate((y, x))
+
+    f = functools.partial(apply_fun_scan, params)
+    cxyc = (c, x_init, np.zeros(params["bias_out"].shape[0]), 0)
+    _, yx = jax.lax.scan(f, cxyc, lambda_t)
+
+    y_rnn_interp = yx[:, : -x_init.shape[0]]
+    x_rnn_interp = yx[:, -x_init.shape[0]:]
+    return x_rnn_interp, y_rnn_interp
+
+
 @functools.partial(jax.jit, static_argnums=(3, 4, 5))
 def forward_rnn_interp(params, C_manifold, x_init, ratio=0.5, length=100, spd_interp=None):
     """
@@ -190,61 +243,61 @@ def forward_rnn_interp(params, C_manifold, x_init, ratio=0.5, length=100, spd_in
     return x_rnn_interp, y_rnn_interp
 
 
-# def wout_ridge_regression(xt: Array, ut: Array, yt_hat: Array, alpha: float) -> Array:
-#     """Compute updated weights with the given optimizer.
+def wout_ridge_regression(xt: Array, ut: Array, yt_hat: Array, alpha: float) -> Array:
+    """Compute updated weights with the given optimizer.
 
-#     :param xt: collected reservoir states (T, N)
-#     :param ut: input (T, K)
-#     :param yt_hat: desired output (T, L)
-#     :param optimizer: optimizer object, e.g. linear regression.
-#     :return W: weight matrix of size (N, N)
-#     """
-#     S = xt.copy()
-#     if alpha is None or alpha == 0.0:
-#         # linear regression
-#         # npy.dot(npy.linalg.pinv(S), yt_hat).T
-#         w_out = npy.dot(npy.linalg.pinv(S), yt_hat).T
-#     else:
-#         # ridge regression
-#         R = npy.dot(S.T, S)
-#         D = yt_hat
-#         P = npy.dot(S.T, D)
-#         w_out = np.dot(npy.linalg.inv(R + alpha * npy.eye(R.shape[0])), P).T
-#     return w_out
+    :param xt: collected reservoir states (T, N)
+    :param ut: input (T, K)
+    :param yt_hat: desired output (T, L)
+    :param optimizer: optimizer object, e.g. linear regression.
+    :return W: weight matrix of size (N, N)
+    """
+    S = xt.copy()
+    if alpha is None or alpha == 0.0:
+        # linear regression
+        # npy.dot(npy.linalg.pinv(S), yt_hat).T
+        w_out = npy.dot(npy.linalg.pinv(S), yt_hat).T
+    else:
+        # ridge regression
+        R = npy.dot(S.T, S)
+        D = yt_hat
+        P = npy.dot(S.T, D)
+        w_out = np.dot(npy.linalg.inv(R + alpha * npy.eye(R.shape[0])), P).T
+    return w_out
 
 
-# def initialize_wout(params, ut, yt, reg_wout=10):
-#     """
-#     Initializes the output weights and bias for a given set of input and output data.
+def initialize_wout(params, ut, yt, reg_wout=10):
+    """
+    Initializes the output weights and bias for a given set of input and output data.
 
-#     Args:
-#     - params (dict): A dictionary containing the RNN parameters.
-#     - ut (numpy.ndarray): input data of shape (batch_size, num_steps, input_size).
-#     - yt (numpy.ndarray): output data of shape (batch_size, num_steps, output_size).
-#     - reg_wout (float): Regularization parameter for the ridge regression.
+    Args:
+    - params (dict): A dictionary containing the RNN parameters.
+    - ut (numpy.ndarray): input data of shape (batch_size, num_steps, input_size).
+    - yt (numpy.ndarray): output data of shape (batch_size, num_steps, output_size).
+    - reg_wout (float): Regularization parameter for the ridge regression.
 
-#     Returns:
-#     - params (dict): updated dictionary of RNN parameters, including output weights and bias.
-#     - X_flat (numpy.ndarray): RNN hidden state of shape (batch_size * num_steps, hidden_size).
-#     - Y_flat (numpy.ndarray): flattened output data of shape (batch_size * num_steps, output_size).
-#     """
-#     # Record input driven dyna
-#     yx_vmap = jax.vmap(forward_rnn, in_axes=(None, None, 0, None, None))
-#     xy = yx_vmap(params, None, ut, params["x_ini"], False)
+    Returns:
+    - params (dict): updated dictionary of RNN parameters, including output weights and bias.
+    - X_flat (numpy.ndarray): RNN hidden state of shape (batch_size * num_steps, hidden_size).
+    - Y_flat (numpy.ndarray): flattened output data of shape (batch_size * num_steps, output_size).
+    """
+    # Record input driven dyna
+    yx_vmap = jax.vmap(forward_rnn, in_axes=(None, None, 0, None, None))
+    xy = yx_vmap(params, None, ut, params["x_ini"], False)
 
-#     X = xy[:, :, ut.shape[2]:]
+    X = xy[:, :, ut.shape[2]:]
 
-#     X_flat = X.reshape(-1, X.shape[-1])
-#     X_flat_bias = np.hstack((X_flat, np.ones((X_flat.shape[0], 1))))
-#     Y_flat = yt.reshape(-1, yt.shape[-1])
-#     Wout_b = wout_ridge_regression(X_flat_bias, 0, Y_flat, reg_wout)
+    X_flat = X.reshape(-1, X.shape[-1])
+    X_flat_bias = np.hstack((X_flat, np.ones((X_flat.shape[0], 1))))
+    Y_flat = yt.reshape(-1, yt.shape[-1])
+    Wout_b = wout_ridge_regression(X_flat_bias, 0, Y_flat, reg_wout)
 
-#     Wout = Wout_b[:, :-1]
-#     b = Wout_b[:, -1]
-#     params["wout"] = Wout
-#     params["bias_out"] = b
-
-#     return params, X_flat, Y_flat
+    Wout = Wout_b[:, :-1]
+    b = Wout_b[:, -1]
+    return Wout, b, X_flat, Y_flat
+    # params["wout"] = Wout
+    # params["bias_out"] = b
+    # return params, X_flat, Y_flat
 
 
 def loss_fn(params, u_input, y_reconstruction, aperture, beta_1=0, beta_2=0, washout=0):
