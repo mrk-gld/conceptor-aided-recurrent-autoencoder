@@ -7,15 +7,18 @@ import optax
 import jax
 import jax.numpy as np
 
-from utils.lstm_utils import update
+from utils.ffnn_utils import update
+from utils.ffnn_utils import SimpleDenseModel
+
+from flax import linen as nn
 # from utils.lstm_utils import rnn_params
 # from utils.lstm_utils import initialize_wout
 from utils.lstm_utils import compute_conceptor
+from utils.ffnn_utils import forward_rnn_interp
 
 from utils.utils import setup_logging_directory
-from utils.utils import visualize_sine_interpolation
 from utils.utils import compute_JS_divergence_and_acf
-from utils.lstm_utils import forward_rnn_interp
+from utils.ffnn_utils import visualize_sine_interpolation
 
 from torch.utils.tensorboard import SummaryWriter
 
@@ -32,14 +35,14 @@ def sine_wave(t_pattern, s):
     return np.array(signal)
 
 
-flags.DEFINE_string("name", "lstm_sin_test", "name of this training run/experiment")
+flags.DEFINE_string("name", "ffnn_sin_test", "name of this training run/experiment")
 flags.DEFINE_string("logdir", "./logs", "path to the log directory")
 flags.DEFINE_integer("num_epochs", 201, "number of training epochs")
 flags.DEFINE_integer("steps_per_eval", 5, "number of training steps per evaluation")
 flags.DEFINE_integer("washout", 0, "washout period")
 flags.DEFINE_integer("rnn_size", 512, "number of hidden units")
 
-flags.DEFINE_float("learning_rate", 8e-4, "learning rate")
+flags.DEFINE_float("learning_rate", 1e-3, "learning rate")
 flags.DEFINE_float("clip_grad", 1e-2, "gradient clipping norm value")
 
 flags.DEFINE_integer("seed", 42, "seed for random number generators")
@@ -70,35 +73,33 @@ def main(_):
 
     input_size = ut_train.shape[-1]
     output_size = yt_train.shape[-1]
-    hidden_size = FLAGS.rnn_size
-
-    # TODO: implement leak rate?
-    # TODO: implement spectral radius scaling?
-    # NOTE: bias_scaling for LSTM ignored (was 0.8)
-    # NOTE: inp_scaling ignored (used 1.0 anyway)
-    # rhoW = 1.0
-    # inp_scaling = 1.0
-    a_dt = 0.2
-    bias_scaling = 0.1
-
+    hidden_size = 100
+    input_size=20
+    # generate input from ut_train that contains 2 dataset (shape (datasets, length=299,features=1)) and a moving window of size input_size
+    dataset_input = []
+    for dataset_idx in range(ut_train.shape[0]):
+        X = []
+        dataset = ut_train[dataset_idx]
+        for i in range(dataset.shape[0] - input_size):
+            X.append(dataset[i:i+input_size])
+        X = np.array(X)
+        dataset_input.append(X)
+    ut_train = np.array(dataset_input).reshape(2,-1,input_size)
+    yt_train = yt_train[:,input_size:,:]
+    
     key = jax.random.PRNGKey(0)
-
-    lstm = nn.LSTMCell(hidden_size)
-    carry = lstm.initialize_carry(key, (input_size,))
-    lstm_params = lstm.init(key, carry, np.zeros((input_size,)))
+    
+    model = SimpleDenseModel()
+    conceptor = np.eye(100)
+    params = model.init(key, np.ones((1, input_size)), conceptor)
+    
+    bias_scaling = 0.1
+    
     params = dict(
-        lstm=lstm_params,
+        ffnn=params,
         wout=jax.nn.initializers.xavier_normal()(key, (output_size, hidden_size)),
         bias_out=jax.nn.initializers.xavier_normal()(key, (output_size,1)).reshape(-1,) * bias_scaling,
-        a_dt=a_dt*np.ones(hidden_size),
-        x_ini=0.01*jax.random.normal(key, shape=(hidden_size,)),
     )
-    # params_ini = rnn_params(512, input_size, output_size, 1.0, 1.0, 0.1, 0.8, seed=21)
-
-    # TODO: set wout with ridge regression?
-    # params_rnn, _, _ = initialize_wout(
-    #     params_ini.copy(), ut_train, yt_train, reg_wout=10
-    # )
 
     optimizer = optax.chain(
         optax.clip(FLAGS.clip_grad), optax.adam(learning_rate=FLAGS.learning_rate)
@@ -106,7 +107,7 @@ def main(_):
 
     opt_state = optimizer.init(params)
     opt_update = optimizer.update
-
+    
     for epoch_idx in tqdm(range(FLAGS.num_epochs)):
         params, opt_state, X, info = update(
             params,
@@ -129,7 +130,7 @@ def main(_):
 
         if epoch_idx % FLAGS.steps_per_eval == 0:
             f_partial = partial(compute_conceptor, aperture=FLAGS.aperture, svd=True)
-            C = jax.vmap(f_partial)(X[:, FLAGS.washout:, :])
+            C = jax.vmap(f_partial)(X)
             
             if FLAGS.calc_metric:
             
@@ -138,7 +139,7 @@ def main(_):
         
                 _, y_interp = forward_rnn_interp(params,
                                                     C,
-                                                    x_init=None,
+                                                    ut_train,
                                                     ratio=lamda,
                                                     length=len_seqs,
                                                     spd_interp=None)
@@ -152,24 +153,23 @@ def main(_):
                 
                 metric = 0.25 * (js_div1 + js_div2 + acf1 + acf2)
                 tb_writer.add_scalar("metric", metric, epoch_idx)
-            
+
             if FLAGS.plot_interp:
-                visualize_sine_interpolation(params, C, log_folder, f"{epoch_idx:03}", ntype='lstm')
+                visualize_sine_interpolation(params, C,ut_train, log_folder, f"{epoch_idx:03}", ntype='lstm')
 
             # save params
-            if FLAGS.save_param:
-                # np.save(f"{log_folder}/ckpt/params_{epoch_idx+1:03}.npz", params)
-                np.savez(
-                    f"{log_folder}/ckpt/params_{epoch_idx+1:03}.npz",
-                    **{key: params[key].__array__() for key in params.keys()},
-                )
+            # np.savez(f"{log_folder}/ckpt/params_{epoch_idx+1:03}.npz", params)
+            np.savez(
+                f"{log_folder}/ckpt/params_{epoch_idx+1:03}.npz",
+                **{key: params[key].__array__() for key in params.keys()},
+            )
 
-                conceptor = {"C_1": C[0], "C_2": C[1]}
-                # save conceptors
-                np.savez(
-                    f"{log_folder}/ckpt/conceptor_{epoch_idx+1:03}.npz",
-                    **{key: np.array(conceptor[key]) for key in conceptor.keys()},
-                )
+            conceptor = {"C_1": C[0], "C_2": C[1]}
+            # save conceptors
+            np.savez(
+                f"{log_folder}/ckpt/conceptor_{epoch_idx+1:03}.npz",
+                **{key: np.array(conceptor[key]) for key in conceptor.keys()},
+            )
 
 
 if __name__ == "__main__":

@@ -50,8 +50,8 @@ def visualize_sine_interpolation(params, conceptors, log_folder, fname, len_seqs
 
         axs[idx].plot(y_interp, label=r"$\lambda=${}".format(lamda))
         axs[idx].legend(frameon=False)
-
-    axs[idx].set_ylabel("y(k)")
+        axs[idx].set_ylabel("y(k)")
+        axs[idx].set_ylim([-1.5, 1.5])
     axs[idx].set_xlabel("k")
     plt.savefig(f'{log_folder}/plots/interpolation_{fname}.png')
     plt.close()

@@ -6,6 +6,10 @@ import jax.numpy as np
 from jax import random
 from jax import jit
 import flax.linen as nn
+
+import os
+import jax.numpy as jnp
+import matplotlib.pyplot as plt
 # from jax import Array
 # import matplotlib.pyplot as plt
 # from jax.example_libraries import optimizers as jax_opt
@@ -79,6 +83,15 @@ def compute_conceptor(X, aperture, svd=False):
 
 #     return jax.tree_map(lambda x: np.array(x), params)
 
+class SimpleDenseModel(nn.Module):
+    @nn.compact
+    def __call__(self, u, C):
+        x1 = nn.Dense(features=100)(u)
+        x1 = jax.nn.tanh(x1)
+        x1 = (C @ x1.T).T
+        x2 = nn.Dense(features=100)(x1)
+        x2 = jax.nn.tanh(x2)
+        return (x1,x2)
 
 @functools.partial(jax.jit, static_argnums=4)
 def forward_rnn(params, conceptor, ut, x_init=None, autoregressive=False):
@@ -97,45 +110,40 @@ def forward_rnn(params, conceptor, ut, x_init=None, autoregressive=False):
     - YX (ndarray): output of the RNN.
     """
     if x_init is None:
-        x_init = params["x_ini"]
+        x_init = np.zeros(params["wout"].shape[1])
 
     if conceptor is None:
-        conceptor = np.eye(x_init.shape[0])
+        conceptor = np.eye(100)
 
     key = jax.random.PRNGKey(0)
-    lstm = nn.LSTMCell(x_init.shape[0])
-    c, _ = lstm.initialize_carry(key, x_init.shape)
+    model = SimpleDenseModel()
+    input_size=20
+    _ = model.init(key, np.ones((1, input_size)), conceptor)
 
     def apply_fun_scan(params, cxy, ut, autoregressive=False):
-        c, x, y = cxy
+        _, x, y = cxy
 
         ut = (
             ut if not autoregressive else np.dot(params["wout"], x) + params["bias_out"]
         )
+        
+        xx = model.apply(params['ffnn'], ut, conceptor)
+        x1, x2 = xx
+        
+        y = params["wout"] @ x2 + params["bias_out"]
 
-        # TODO: handle the carry
-        # x_rnn = np.tanh(params["w"] @ x + params["win"] @ ut + params["bias"])
-        (c, _), x_rnn = lstm.apply(params['lstm'], (c, x), ut)
+        cxy = (None, x1, y)
 
-        x = conceptor @ (
-            (1 - params["a_dt"]) * x
-            + params["a_dt"] * x_rnn
-        )
-
-        y = params["wout"] @ x + params["bias_out"]
-
-        cxy = (c, x, y)
-
-        return cxy, np.concatenate((y, x))
+        return cxy, np.concatenate((y, x1))
 
     f = functools.partial(apply_fun_scan, params, autoregressive=autoregressive)
-    cxy = (c, x_init, np.zeros(params["bias_out"].shape[0]))
+    cxy = (None, x_init, np.zeros(params["bias_out"].shape[0]))
     _, yx = jax.lax.scan(f, cxy, ut)
     return yx
 
 
-@functools.partial(jax.jit, static_argnums=(3,4))
-def forward_rnn_interp(params, C_manifold, x_init, ratio=0.5, length=200,spd_interp=None):
+@functools.partial(jax.jit, static_argnums=(3, 4))
+def forward_rnn_interp(params, C_manifold, ut, ratio, length, spd_interp=None):
     """
     Computes the autoregressive mode forward pass of a recurrent neural network (RNN) with
     interpolated parameters.
@@ -150,44 +158,73 @@ def forward_rnn_interp(params, C_manifold, x_init, ratio=0.5, length=200,spd_int
     - y_rnn_interp (ndarray):
     - x_rnn_interp (ndarray):
     """
-    if x_init is None:
-        x_init = params["x_ini"]
+
+    conceptor = (1-ratio) * C_manifold[0] + ratio * C_manifold[1]
 
     key = jax.random.PRNGKey(0)
-    lstm = nn.LSTMCell(x_init.shape[0])
-    c, _ = lstm.initialize_carry(key, x_init.shape)
+    model = SimpleDenseModel()
+    input_size=20
+    _ = model.init(key, np.ones((1, input_size)),conceptor)
 
-    def apply_fun_scan(params, cxyc, ratio):
-        c, x, y, count = cxyc
+    def apply_fun_scan(params, cxy, ut, autoregressive=False):
+        _, x, y = cxy
 
-        C_fb = (1 - ratio) * C_manifold[0] + ratio * C_manifold[1]
-
-        ut = params["wout"] @ x + params["bias_out"]
-
-        # x_rnn = np.tanh(params["w"] @ x + params["win"] @ ut + params["bias"])
-        (c, _), x_rnn = lstm.apply(params['lstm'], (c, x), ut)
-
-        x = C_fb @ (
-            (1 - params["a_dt"]) * x
-            + params["a_dt"] * x_rnn
+        ut = (
+            ut if not autoregressive else x
         )
 
-        y = params["wout"] @ x + params["bias_out"]
+        xx = model.apply(params['ffnn'], ut, conceptor)
+        x1, x2 = xx
+        
+        y = params["wout"] @ x2 + params["bias_out"]
+        
+        # Shift x by 1 and insert y
+        x_shifted = np.concatenate((x[1:], y))
+        
+        cxy = (None, x_shifted, y)
 
-        cxyc = (c, x, y, count + 1)
+        return cxy, np.concatenate((y, x1))
 
-        return cxyc, np.concatenate((y, x))
-
-    f = functools.partial(apply_fun_scan, params)
-    cxyc = (c, x_init, np.zeros(params["bias_out"].shape[0]), 0)
+    f = functools.partial(apply_fun_scan, params, autoregressive=True)
+    cxy = (None, ut[0,0,:], np.zeros(params["bias_out"].shape[0]))
     
-    lambda_t = np.ones(length) * ratio
-    _, yx = jax.lax.scan(f, cxyc, lambda_t)
+    ut_fake = np.zeros((length,input_size))
+    
+    _, yx = jax.lax.scan(f, cxy, ut_fake)
 
-    y_rnn_interp = yx[:, : -x_init.shape[0]]
-    x_rnn_interp = yx[:, -x_init.shape[0]:]
+    y_rnn_interp = yx[:, : -params["wout"].shape[1]]
+    x_rnn_interp = yx[:, -params["wout"].shape[1]:]
+    
     return x_rnn_interp, y_rnn_interp
 
+def visualize_sine_interpolation(params, conceptors,ut_train, log_folder, fname, len_seqs=300, ntype='rnn'):
+    """
+    Visualizes the interpolation of a sine wave using a recurrent neural network.
+
+    Args:
+    - params: dictionary containing the parameters of the RNN
+    - conceptors: dictionary containing the conceptors of the RNN
+    - log_folder: string representing the path to the log folder
+    - filename: string representing the name of the file to save the plot
+    - len_seqs: integer representing the length of the sequence to interpolate
+
+    Returns:
+    - None
+    """
+    fig, axs = plt.subplots(5, sharex=True, sharey=True)
+    # compute how the system interpolate
+    for idx, lamda in enumerate([0, 0.25, 0.5, 0.75, 1]):
+        # t_interp = 100
+        x_interp, y_interp = forward_rnn_interp(
+            params, conceptors, ut_train, ratio=lamda, length=len_seqs)
+
+        axs[idx].plot(y_interp, label=r"$\lambda=${}".format(lamda))
+        axs[idx].legend(frameon=False)
+
+    axs[idx].set_ylabel("y(k)")
+    axs[idx].set_xlabel("k")
+    plt.savefig(f'{log_folder}/plots/interpolation_{fname}.png')
+    plt.close()
 
 # def wout_ridge_regression(xt: Array, ut: Array, yt_hat: Array, alpha: float) -> Array:
 #     """Compute updated weights with the given optimizer.
@@ -276,11 +313,11 @@ def loss_fn(params, u_input, y_reconstruction, aperture, beta_1=0, beta_2=0, was
     forward_vmap = jax.vmap(forward_rnn, (None, None, 0, None, None))
     yx = forward_vmap(params, None, u_input, x_init, False)
 
-    X = yx[:, :, u_input.shape[2]:]
-    y_rnn = yx[:, :, : u_input.shape[2]]
+    X = yx[:, :, y_reconstruction.shape[2]:]
+    y_rnn = yx[:, :, :y_reconstruction.shape[2]]
 
     error_per_sample = np.sum(
-        (y_rnn[:, washout:, :] - y_reconstruction[:, washout:, :]) ** 2, axis=2
+        (y_rnn - y_reconstruction) ** 2, axis=2
     )
     error_per_sample = np.mean(error_per_sample, axis=1)
 

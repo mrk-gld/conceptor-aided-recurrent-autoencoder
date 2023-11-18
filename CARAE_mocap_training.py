@@ -74,8 +74,8 @@ def main(_):
                             seed=FLAGS.seed)
 
     params_rnn, _, _ = initialize_wout(
-        params_ini.copy(), ut_train, yt_train, reg_wout=10)
-
+        params_ini.copy(), ut_train, yt_train, reg_wout=1e2)
+    
     optimizer = optax.chain(
         optax.clip(FLAGS.clip_grad),
         optax.adam(learning_rate=FLAGS.learning_rate)

@@ -236,7 +236,7 @@ def initialize_wout(params, ut, yt, reg_wout=10):
     return params, X_flat, Y_flat
 
 
-def loss_fn(params, u_input, y_reconstruction, aperture, beta_1=0, beta_2=0, washout=0):
+def loss_fn(params, u_input, y_reconstruction, aperture, beta_1=0, beta_2=0, washout=0, distance_metric=None):
     """
     Computes the loss function for a given set of parameters, input, and target output.
 
@@ -280,7 +280,9 @@ def loss_fn(params, u_input, y_reconstruction, aperture, beta_1=0, beta_2=0, was
     M = jax.vmap(lambda x: np.mean(x, axis=0), (0))(X)
 
     err_mse = np.mean(error_per_sample)
-    err_c = np.linalg.norm(C[0] - C[1])
+    
+    err_c = np.linalg.norm(C[0] - C[1]) if distance_metric is None else distance_metric(C[0], C[1])
+    
     err_c_mean = np.linalg.norm(M[0] - M[1])
     # ridge = np.linalg.norm(params["wout"] ** 2) + np.linalg.norm(params["w"] ** 2)
     loss = err_mse + beta_1 * err_c + beta_2 * err_c_mean  # + 0.01 * ridge
@@ -288,7 +290,7 @@ def loss_fn(params, u_input, y_reconstruction, aperture, beta_1=0, beta_2=0, was
     return loss, (err_c, err_c_mean, error_per_sample, X)
 
 
-@functools.partial(jax.jit, static_argnums=(4, 5, 6, 7, 8))
+@functools.partial(jax.jit, static_argnums=(4, 5, 6, 7, 8, 9))
 def update(
     params,
     u_input,
@@ -299,6 +301,7 @@ def update(
     beta_1=0,
     beta_2=0,
     washout=0,
+    distance_metric=None,
 ):
     """
     Update the parameters of a recurrent neural network using the given input and output data.
@@ -324,7 +327,7 @@ def update(
     - grads_norm: the norm of the gradients used in the update
     """
     (loss, ret), grads = jax.value_and_grad(loss_fn, has_aux=True)(
-        params, u_input, y_reconstruction, aperture, beta_1, beta_2, washout
+        params, u_input, y_reconstruction, aperture, beta_1, beta_2, washout, distance_metric
     )
 
     err_c, err_c_mean, err_mse, X = ret

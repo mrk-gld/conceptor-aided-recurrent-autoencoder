@@ -49,6 +49,7 @@ flags.DEFINE_float("aperture", 10, "aperture of the conceptor")
 
 flags.DEFINE_bool("plot_interp", True, "plot interpolation between sine waves")
 flags.DEFINE_bool("calc_metric", True, "calculate metric for interpolation")
+flags.DEFINE_bool("save_param",False,"save parameters")
 
 def main(_):
     t_pattern = 300
@@ -139,17 +140,17 @@ def main(_):
                                         C,
                                         log_folder,
                                         f"{epoch_idx:03}")
+            if FLAGS.save_param:
+                # save params
+                np.savez(f"{log_folder}/ckpt/params_{epoch_idx+1:03}.npz", **{
+                    key: params_rnn[key].__array__() for key in params_rnn.keys()
+                })
 
-            # save params
-            np.savez(f"{log_folder}/ckpt/params_{epoch_idx+1:03}.npz", **{
-                key: params_rnn[key].__array__() for key in params_rnn.keys()
-            })
-
-            conceptor = {"C_1": C[0], "C_2": C[1]}
-            # save params
-            np.savez(f"{log_folder}/ckpt/conceptor_{epoch_idx+1:03}.npz", **{
-                key: np.array(conceptor[key]) for key in conceptor.keys()
-            })
+                conceptor = {"C_1": C[0], "C_2": C[1]}
+                # save params
+                np.savez(f"{log_folder}/ckpt/conceptor_{epoch_idx+1:03}.npz", **{
+                    key: np.array(conceptor[key]) for key in conceptor.keys()
+                })
 
 
 if __name__ == "__main__":
