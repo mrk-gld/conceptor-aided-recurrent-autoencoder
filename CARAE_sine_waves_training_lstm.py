@@ -85,13 +85,10 @@ def main(_):
     params = dict(
         lstm=lstm_params,
         wout=wout_init(key, shape=(output_size, hidden_size)),
-        # wout=nn.initializers.xavier_normal()(key, shape=(output_size, hidden_size)),
-        # wout=jax.random.normal(key, shape=(output_size, hidden_size)),
         bias_out=jax.random.normal(key, shape=(output_size,)) * bias_scaling,
         a_dt=a_dt*np.ones(hidden_size),
         x_ini=0.1*jax.random.normal(key, shape=(hidden_size,)),
     )
-    # params_ini = rnn_params(512, input_size, output_size, 1.0, 1.0, 0.1, 0.8, seed=21)
     # TODO: set wout with ridge regression?
     # params_rnn, _, _ = initialize_wout(params_ini.copy(), ut_train, yt_train, reg_wout=10)
 
@@ -134,10 +131,6 @@ def main(_):
 
             # save params
             np.save(f"{log_folder}/ckpt/params_{epoch_idx+1:03}.npz", params)
-            # np.savez(
-            #     f"{log_folder}/ckpt/params_{epoch_idx+1:03}.npz",
-            #     **{key: params[key].__array__() for key in params.keys()},
-            # )
 
             conceptor = {"C_1": C[0], "C_2": C[1]}
             # save conceptors
