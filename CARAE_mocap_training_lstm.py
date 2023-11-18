@@ -9,8 +9,7 @@ import jax.numpy as np
 
 from torch.utils.tensorboard import SummaryWriter
 
-from utils.lstm_utils import update, compute_conceptor
-
+from utils.lstm_utils import update, compute_conceptor, initialize_wout
 # from utils.rnn_utils import rnn_params
 # from utils.rnn_utils import initialize_wout
 
@@ -22,7 +21,7 @@ from utils.mocap_utils import get_mocap_data
 # define flags
 FLAGS = flags.FLAGS
 
-flags.DEFINE_string("name", "mocap_interp", "name of this training run/experiment")
+flags.DEFINE_string("name", "lstm_mocap", "name of this training run/experiment")
 flags.DEFINE_string("logdir", "./logs", "path to the log directory")
 flags.DEFINE_integer("num_epochs", 3050, "number of training epochs")
 flags.DEFINE_integer("steps_per_eval", 100, "number of training steps per evaluation")
@@ -36,6 +35,10 @@ flags.DEFINE_integer("seed", 42, "seed for random number generators")
 flags.DEFINE_float("beta_1", 0.02, "conceptor loss amplitude")
 flags.DEFINE_float("beta_2", 0.1, "conceptor loss amplitude")
 flags.DEFINE_float("aperture", 10, "aperture of the conceptor")
+flags.DEFINE_float("leak_rate", 0.8, "leak rate of the reservoir")
+flags.DEFINE_float("bias_scaling", 0.1, "leak rate of the reservoir")
+flags.DEFINE_bool("wout_xavier", True, "use xavier init for wout (if not, then normal)")
+flags.DEFINE_bool("compute_wout", True, "compute wout with ridge regression")
 
 
 def main(_):
@@ -59,32 +62,33 @@ def main(_):
     output_size = yt_train.shape[-1]
     hidden_size = FLAGS.rnn_size
 
-    # TODO: implement leak rate?
+    # NOTE: leak rate implemented outside of LSTM - should be fine
     # TODO: implement spectral radius scaling?
     # NOTE: bias_scaling for LSTM ignored (was 0.8)
-    # NOTE: inp_scaling ignored (used 1.0 anyway)
     # rhoW = 1.0
-    # inp_scaling = 1.0
-    a_dt = 0.1
-    bias_scaling = 0.8
+    a_dt = FLAGS.leak_rate
+    bias_scaling = FLAGS.bias_scaling
 
     key = jax.random.PRNGKey(0)
 
     lstm = nn.LSTMCell(hidden_size)
     carry = lstm.initialize_carry(key, (input_size,))
     lstm_params = lstm.init(key, carry, np.zeros((input_size,)))
+    wout_init = nn.initializers.xavier_normal() if FLAGS.wout_xavier else jax.random.normal
     params = dict(
         lstm=lstm_params,
-        wout=jax.random.normal(key, shape=(output_size, hidden_size)),
+        wout=wout_init(key, shape=(output_size, hidden_size)),
         bias_out=jax.random.normal(key, shape=(output_size,)) * bias_scaling,
         a_dt=a_dt * np.ones(hidden_size),
         x_ini=0.1 * jax.random.normal(key, shape=(hidden_size,)),
     )
+    if FLAGS.compute_wout:
+        wout, bias_out, _, _ = initialize_wout(params, ut_train, yt_train, reg_wout=10)
+        params['wout'] = wout
+        params['bias_out'] = bias_out
 
-    # params_ini = rnn_params(FLAGS.rnn_size, input_size,
-    #                         output_size, 1., 1., 0.1, 0.8, seed=21)
-    # params_rnn, _, _ = initialize_wout(
-    #     params_ini.copy(), ut_train, yt_train, reg_wout=10)
+    print(f'logs into {log_folder}, bias scaling {bias_scaling}, wout init {wout_init}')
+    print(f'leak rate a_dt={a_dt}')
 
     optimizer = optax.chain(
         optax.clip(FLAGS.clip_grad), optax.adam(learning_rate=FLAGS.learning_rate)
@@ -121,9 +125,7 @@ def main(_):
 
             # save params
             np.save(f"{log_folder}/ckpt/params_{epoch_idx+1:03}.npz", params)
-            # np.savez(f"{log_folder}/ckpt/params_{epoch_idx+1:03}.npz", **{
-            #     key: params[key].__array__() for key in params.keys()
-            # })
+
             conceptor = {"C_1": C[0], "C_2": C[1]}
             np.savez(
                 f"{log_folder}/ckpt/conceptor_{epoch_idx+1:03}.npz",
