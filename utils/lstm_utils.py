@@ -179,8 +179,6 @@ def forward_rnn_interp_old(params, C_manifold, x_init, lambda_t):
 
     f = functools.partial(apply_fun_scan, params)
     cxyc = (c, x_init, np.zeros(params["bias_out"].shape[0]), 0)
-    
-    lambda_t = np.ones(length) * ratio
     _, yx = jax.lax.scan(f, cxyc, lambda_t)
 
     y_rnn_interp = yx[:, : -x_init.shape[0]]
