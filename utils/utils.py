@@ -3,6 +3,7 @@ import jax.numpy as jnp
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
+from sklearn.decomposition import PCA
 
 from utils.rnn_utils import forward_rnn_interp as forward_rnn_interp_rnn
 from utils.lstm_utils import forward_rnn_interp as forward_rnn_interp_lstm
@@ -57,7 +58,7 @@ def visualize_sine_interpolation(params, conceptors, log_folder, fname, len_seqs
     plt.close()
 
 
-def visualize_mocap_interpolation(params, conceptors, log_folder, filename):
+def visualize_mocap_interpolation(params, conceptors, log_folder, filename, ntype='rnn'):
     """
     Visualize the interpolation of the motion capture data using the Echo State Network.
 
@@ -71,6 +72,7 @@ def visualize_mocap_interpolation(params, conceptors, log_folder, filename):
     Returns:
         None
     """
+    forward_rnn_interp = forward_rnn_interp_rnn if ntype == 'rnn' else forward_rnn_interp_lstm
     len_seqs = 200
     # compute how the system interpolates
     states = []
@@ -89,7 +91,7 @@ def visualize_mocap_interpolation(params, conceptors, log_folder, filename):
     ax = fig.add_subplot(111, projection='3d')
     for lamda, state in zip(lamdas, states):
         data_pca = pca.transform(state)
-        ax.plot(data_pca[:, 0], data_pca[:, 1], lamda,label=r"$\lambda$={}".format(lamda))
+        ax.plot(data_pca[:, 0], data_pca[:, 1], lamda, label=r"$\lambda$={}".format(lamda))
 
     plt.legend()
     plt.tight_layout()
