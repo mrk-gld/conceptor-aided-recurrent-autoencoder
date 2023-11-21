@@ -13,7 +13,9 @@ import os
 from tqdm.auto import tqdm
 from torch.utils.tensorboard import SummaryWriter
 from flax.training import train_state, checkpoints
+
 # from jax import random
+from typing import Tuple
 
 
 # # Path to the folder where the datasets are/should be downloaded (e.g. CIFAR10)
@@ -101,6 +103,69 @@ class MultiheadAttention(nn.Module):
         return o, attention
 
 
+class TransformerDecoderLayer(nn.Module):
+    dropout_prob: float
+    embed_dim: int
+    num_heads: int
+    mlp_hidden_dim: int
+
+    @nn.compact
+    def __call__(
+        self,
+        x: jnp.array,
+        memory: jnp.array,
+        decoder_mask: jnp.array,
+        encoder_decoder_mask: jnp.array,
+        training: bool,
+    ) -> Tuple[jnp.array, jnp.array, jnp.array]:
+        """Applys TransformerDecoderLayer module.
+
+        Args:
+        x: inputs, shape [batch_size, seqlen, features].
+        memory: encoding from TransformerEncoder, shape [batch_size, memory_length, features].
+        decoder_mask: self-attention mask, shape [batch_size, 1, x_length, x_length].
+        encoder_decoder_mask: source-target attention mask, shape [batch_size, 1, seqlen, memlen].
+        training: parameter for nn.Dropout (if false, mask and scale inputs).
+
+        Returns:
+        - outputs of the same shape of the inputs,
+        - self-attention matrix, shape [batch_size, num_heads, seqlen, seqlen],
+        - source-target attention matrix, shape [batch_size, num_heads, seqlen, memlen].
+        """
+        assert x.ndim == 3  # [Batch, SeqLen, EmbedDim]
+        assert memory.ndim == 3  # [Batch, SeqLen, EmbedDim]
+        assert decoder_mask.ndim == 4  # [Batch, 1, SeqLen_q, SeqLen_k]
+        assert encoder_decoder_mask.ndim == 4  # [Batch, 1, SeqLen_q, SeqLen_k]
+        assert self.embed_dim == memory.shape[2] == x.shape[2]
+
+        res = x  # Residual
+        x, self_attention = MultiheadAttention(embed_dim=self.embed_dim, num_heads=self.num_heads)(
+            x, mask=decoder_mask
+        )  # Self-Attention
+        x = nn.Dropout(rate=self.dropout_prob)(
+            x, deterministic=not training
+        )  # Dropout
+        x = nn.LayerNorm()(res + x)  # Add & Norm
+
+        res = x  # Residual
+        x, src_trg_attention = MultiheadAttention(embed_dim=None, num_heads=None)(
+            x, memory, memory, mask=encoder_decoder_mask
+        )  # Source-Target Attention
+        x = nn.Dropout(rate=self.dropout_prob)(
+            x, deterministic=not training
+        )  # Dropout
+        x = nn.LayerNorm()(res + x)  # Add & Norm
+
+        res = x  # Residual
+        x = FeedforwardBlock(hidden_dim=self.mlp_hidden_dim, dropout_prob=self.dropout_prob,
+                             output_dim=self.mlp_hidden_dim)(  # TODO: is this right? <-
+            x, not training
+        )  # Feed Forward Network
+        x = nn.LayerNorm()(res + x)  # Add & Norm
+
+        return x, self_attention, src_trg_attention
+
+
 class EncoderBlock(nn.Module):
     input_dim: int  # needed here since it is equal to the output dimension (residual connection)
     num_heads: int
@@ -138,9 +203,59 @@ class EncoderBlock(nn.Module):
                 if not isinstance(layer, nn.Dropout)
                 else layer(linear_out, deterministic=not train)
             )
-        x = x + self.dropout(linear_out, deterministic=not train)
+        linear_out = self.dropout(linear_out, deterministic=not train)
+
+        # residual
+        x = x + linear_out
         x = self.norm2(x)
 
+        return x
+
+
+class PositionalEncoding(nn.Module):
+    d_model: int  # Hidden dimensionality of the input.
+    max_len: int = 5000  # Maximum length of a sequence to expect.
+
+    def setup(self):
+        # Create matrix of [SeqLen, HiddenDim] representing positional encoding for max_len inputs
+        pe = np.zeros((self.max_len, self.d_model))
+        position = np.arange(0, self.max_len, dtype=np.float32)[:, None]
+        div_term = np.exp(
+            np.arange(0, self.d_model, 2) * (-math.log(10000.0) / self.d_model)
+        )
+        pe[:, 0::2] = np.sin(position * div_term)
+        pe[:, 1::2] = np.cos(position * div_term)
+        pe = pe[None]
+        self.pe = jax.device_put(pe)
+
+    def __call__(self, x):
+        x = x + self.pe[:, : x.shape[1]]
+        return x
+
+
+class FeedforwardBlock(nn.Module):
+    """Feedforward network with LayerNorms in between the layers."""
+
+    hidden_dim: int
+    dropout_prob: float
+    output_dim: int
+
+    def setup(self):
+        self.layers = [
+            nn.Dense(self.hidden_dim),
+            nn.LayerNorm(),
+            nn.relu,
+            nn.Dropout(self.dropout_prob),
+            nn.Dense(self.output_dim),
+        ]
+
+    def __call__(self, x, train=True):
+        for layer in self.layers:
+            x = (
+                layer(x)
+                if not isinstance(layer, nn.Dropout)
+                else layer(x, deterministic=not train)
+            )
         return x
 
 
@@ -173,27 +288,6 @@ class TransformerEncoder(nn.Module):
             attention_maps.append(attn_map)
             x = layer(x, mask=mask, train=train)
         return attention_maps
-
-
-class PositionalEncoding(nn.Module):
-    d_model: int  # Hidden dimensionality of the input.
-    max_len: int = 5000  # Maximum length of a sequence to expect.
-
-    def setup(self):
-        # Create matrix of [SeqLen, HiddenDim] representing positional encoding for max_len inputs
-        pe = np.zeros((self.max_len, self.d_model))
-        position = np.arange(0, self.max_len, dtype=np.float32)[:, None]
-        div_term = np.exp(
-            np.arange(0, self.d_model, 2) * (-math.log(10000.0) / self.d_model)
-        )
-        pe[:, 0::2] = np.sin(position * div_term)
-        pe[:, 1::2] = np.cos(position * div_term)
-        pe = pe[None]
-        self.pe = jax.device_put(pe)
-
-    def __call__(self, x):
-        x = x + self.pe[:, :x.shape[1]]
-        return x
 
 
 class TransformerPredictor(nn.Module):
@@ -269,6 +363,7 @@ class TransformerPredictorRegression(nn.Module):
     NOTE: input and output have same dimensionality.
     NOTE: currently two MLP layers at the end.
     """
+
     model_dim: int  # Hidden dimensionality to use inside the Transformer
     input_dim: int  # Number of input features
     num_heads: int  # Number of heads to use in the Multi-Head Attention blocks
@@ -445,9 +540,7 @@ class TrainerModuleRegression:
         # Train model for one epoch, and log avg loss and accuracy
         losses = []
         for batch in tqdm(train_loader, desc="Training", leave=False):
-            self.state, self.rng, loss = self.train_step(
-                self.state, self.rng, batch
-            )
+            self.state, self.rng, loss = self.train_step(self.state, self.rng, batch)
             losses.append(loss)
         avg_loss = np.stack(jax.device_get(losses)).mean()
         self.logger.add_scalar("train/loss", avg_loss, global_step=epoch)
