@@ -29,20 +29,21 @@ def forward(state, batch, *, train: bool):
     return y_pred, loss
 
 
-@partial(jax.jit, static_argnames=('train', 'aperture', 'beta_1', 'beta_2'))
-def forward_conceptor(state, batch, *, train: bool, aperture, beta_1, beta_2):
+@partial(jax.jit, static_argnames=('train', 'aperture', 'beta_1', 'beta_2', 'conceptor_layers'))
+def forward_conceptor(state, batch, *, train: bool, aperture, beta_1, beta_2, conceptor_layers):
     x, y = batch
     rngs = {'dropout': jax.random.fold_in(jax.random.PRNGKey(0), state.step)}
     variables = {'params': state.params}
     y_pred, loss, info = state.apply_fn(
         variables, x, train=train, targets=y, rngs=rngs, conceptor_loss=True,
-        aperture=aperture, beta_1=beta_1, beta_2=beta_2
+        aperture=aperture, beta_1=beta_1, beta_2=beta_2, conceptor_layers=conceptor_layers
     )
     return y_pred, loss, info
 
 
-@partial(jax.jit, static_argnames=('train', 'aperture', 'beta_1', 'beta_2'))
-def forward_conceptor_interpolation(state, batch, *, train: bool, conceptors, ratios):
+@partial(jax.jit, static_argnames=('train', 'aperture', 'beta_1', 'beta_2', 'conceptor_layers'))
+def forward_conceptor_interpolation(state, batch, *, train: bool, conceptors, ratios,
+                                    conceptor_layers):
     """
     conceptors: two conceptors of shape (2, t, features)
                 where the first one is the conceptor of the first input (min. freq.)
@@ -57,7 +58,8 @@ def forward_conceptor_interpolation(state, batch, *, train: bool, conceptors, ra
     variables = {'params': state.params}
     y_pred, loss = state.apply_fn(
         variables, x, train=train, targets=y, rngs=rngs,
-        conceptor_interpolation=True, conceptors=conceptors, ratios=ratios
+        conceptor_interpolation=True, conceptors=conceptors, ratios=ratios,
+        conceptor_layers=conceptor_layers
     )
     return y_pred, loss
 
@@ -74,12 +76,13 @@ def train_step(state, batch):
     return loss, state
 
 
-@partial(jax.jit, donate_argnames=('state',), static_argnames=('aperture', 'beta_1', 'beta_2'))
-def train_step_conceptor(state, batch, aperture, beta_1, beta_2):
+@partial(jax.jit, donate_argnames=('state',), static_argnames=('aperture', 'beta_1', 'beta_2', 'conceptor_layers'))
+def train_step_conceptor(state, batch, aperture, beta_1, beta_2, conceptor_layers):
     def loss_fn(params):
         state_ = state.replace(params=params)
         _, loss, ret = forward_conceptor(state_, batch, train=True, aperture=aperture,
-                                         beta_1=beta_1, beta_2=beta_2)
+                                         beta_1=beta_1, beta_2=beta_2,
+                                         conceptor_layers=conceptor_layers)
         return loss, ret
     (loss, ret), grad = jax.value_and_grad(loss_fn, has_aux=True)(state.params)
     state = state.apply_gradients(grads=grad)
@@ -135,6 +138,7 @@ flags.DEFINE_integer("n_layers", 3, "number of transformer layers")
 flags.DEFINE_integer("n_embd", 128, "embedding dimension")
 
 flags.DEFINE_boolean("conceptor_loss", True, "use conceptor loss")
+flags.DEFINE_list("conceptor_layers", [0], "layers for conceptor loss and interpolation")
 
 
 def setup_model(t_pattern=300):
@@ -164,6 +168,8 @@ def setup_model(t_pattern=300):
 
 
 def main(_):
+    conceptor_layers = tuple(map(int, FLAGS.conceptor_layers))
+
     # setup dataset: 2 training sine waves, 8 testing sine waves
     t_pattern = 300
     datasets = jax.vmap(sine_wave, in_axes=(None, 0))(t_pattern, np.linspace(1, 3, 10))
@@ -195,7 +201,8 @@ def main(_):
 
         if FLAGS.conceptor_loss:
             loss, state, info = train_step_conceptor(
-                state, batch, aperture=FLAGS.aperture, beta_1=FLAGS.beta_1, beta_2=FLAGS.beta_2
+                state, batch, aperture=FLAGS.aperture, beta_1=FLAGS.beta_1, beta_2=FLAGS.beta_2,
+                conceptor_layers=conceptor_layers
             )
             loss_c, loss_y, err_c, err_c_mean, X = info
             # C = compute_conceptor(X, FLAGS.aperture)
@@ -221,12 +228,12 @@ def main(_):
                 # compute train loss with the conceptor plugged in
                 _, train_loss = forward_conceptor_interpolation(
                     state, batch, train=False, conceptors=conceptor_manifold,
-                    ratios=np.array([0., 1.])
+                    ratios=np.array([0., 1.]), conceptor_layers=conceptor_layers
                 )
                 # compute test loss with the conceptor plugged in
                 _, test_loss = forward_conceptor_interpolation(
                     state, (ut_test, yt_test), train=False, conceptors=conceptor_manifold,
-                    ratios=np.linspace(0, 1, 10)[1:-1]
+                    ratios=np.linspace(0, 1, 10)[1:-1], conceptor_layers=conceptor_layers
                 )
             else:
                 _, train_loss = forward(state, batch, train=False)
@@ -284,48 +291,6 @@ def main(_):
 
             # update progress bar
             pbar.set_postfix_str(f"loss train={train_loss:.2f}, test={test_loss:.2f}")
-
-        # if epoch_idx % FLAGS.steps_per_eval == 0:
-        #     f_partial = partial(compute_conceptor, aperture=FLAGS.aperture, svd=True)
-        #     C = jax.vmap(f_partial)(X[:, FLAGS.washout:, :])
-
-        #     if FLAGS.calc_metric:
-        #         lamda = 0.5
-        #         len_seqs = 1000
-
-        #         _, y_interp = forward_rnn_interp(
-        #             params_rnn,
-        #             C,
-        #             x_init=None,
-        #             ratio=lamda,
-        #             length=len_seqs,
-        #             spd_interp=None,
-        #         )
-
-        #         js_div1, js_div2, acf1, acf2 = compute_JS_divergence_and_acf(
-        #             ut_train[0], ut_train[1], y_interp, lag=30, bins=50
-        #         )
-
-        #         metric = 0.25 * (js_div1 + js_div2 + acf1 + acf2)
-        #         tb_writer.add_scalar("metric", metric, epoch_idx)
-
-        #     if FLAGS.plot_interp:
-        #         visualize_sine_interpolation(
-        #             params_rnn, C, log_folder, f"{epoch_idx:03}"
-        #         )
-        #     if FLAGS.save_param:
-        #         # save params
-        #         np.savez(
-        #             f"{log_folder}/ckpt/params_{epoch_idx+1:03}.npz",
-        #             **{key: params_rnn[key].__array__() for key in params_rnn.keys()},
-        #         )
-
-        #         conceptor = {"C_1": C[0], "C_2": C[1]}
-        #         # save params
-        #         np.savez(
-        #             f"{log_folder}/ckpt/conceptor_{epoch_idx+1:03}.npz",
-        #             **{key: np.array(conceptor[key]) for key in conceptor.keys()},
-        #         )
 
 
 if __name__ == "__main__":

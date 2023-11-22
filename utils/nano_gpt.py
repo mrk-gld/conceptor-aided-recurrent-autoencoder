@@ -158,6 +158,7 @@ class GPT(nn.Module):
         conceptor_loss: bool = False, aperture: float = 10, beta_1=0, beta_2=0,
         conceptor_interpolation: bool = False,  conceptors: Optional[jax.Array] = None,
         ratios: Optional[jax.Array] = None,
+        conceptor_layers=None,
     ):
         """
         x: inputs of shape (b, t, features)
@@ -170,6 +171,7 @@ class GPT(nn.Module):
         ratio: ratio of the interpolation between the two conceptors
                if ratio = 0, the conceptor of the first input is used (min. freq.)
                if ratio = 1, the conceptor of the second input is used (max. freq.)
+        conceptor_layers: list of layer idxs to apply the conceptor to
         """
         if conceptor_interpolation:
             # assert x.shape[0] == 1, "batch size must be 1 for interpolation"
@@ -195,24 +197,25 @@ class GPT(nn.Module):
             conceptor = jax.vmap(lambda c, r: (1-r)*c[0] + r*c[1], (None, 0))(conceptors, ratios)
             # conceptor = conceptors[0] * (1 - ratio) + conceptors[1] * ratio
 
+        n_c_lay = self.config.n_layer if conceptor_layers is None else len(conceptor_layers)
         X = []
         for idx, block in enumerate(self.h):
             # forward the GPT model itself
             x = block(x, train=train)
-            if conceptor_loss:
+            if conceptor_loss and (idx in conceptor_layers or conceptor_layers is None):
                 # save the hidden states for the conceptor computation later
                 X.append(x)
-            if conceptor_interpolation:
+            if conceptor_interpolation and (idx in conceptor_layers or conceptor_layers is None):
                 # plug in the conceptor matrix
-                # TODO: make this a batched matrix multiplication
-                c_idx = jnp.split(jnp.split(conceptor, 3, axis=1)[idx], 3, axis=2)[idx]
-                x = jax.vmap(lambda ci, xi: (ci @ xi.T).T)(c_idx, x)
+                c_idx = conceptor_layers.index(idx) if conceptor_layers is not None else idx
+                c = jnp.split(jnp.split(conceptor, n_c_lay, axis=1)[c_idx], n_c_lay, axis=2)[c_idx]
+                x = jax.vmap(lambda ci, xi: (ci @ xi.T).T)(c, x)
 
         # layer norm
         x = self.ln_f(x)
 
         if conceptor_loss:
-            # X -> (batch, time, features*layers)
+            # X -> (batch, time, features*(layers|len(conceptor_layers)))
             X = jnp.concatenate(X, axis=2)
             C = jax.vmap(lambda x: compute_conceptor(x, aperture))(X)
             M = jax.vmap(lambda x: jnp.mean(x, axis=0), (0))(X)
