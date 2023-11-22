@@ -303,12 +303,26 @@ class GPT(nn.Module):
 
     def generate(
         self, key, params, x: jax.Array, max_new_tokens: int,  # temperature=1.0, top_k=None
+        conceptors: Optional[jax.Array] = None, ratios: Optional[jax.Array] = None,
+        conceptor_layers=None
     ):
         """
         Take a conditioning sequence of indices idx (LongTensor of shape (b,t)) and complete
         the sequence max_new_tokens times, feeding the predictions back into the model each time.
         Most likely you'll want to make sure to be in model.eval() mode of operation for this.
+
+        conceptors: two conceptors of shape (2, t, features)
+            where the first one is the conceptor of the first input (min. freq.)
+            and the second one is the conceptor of the second input (max. freq.)
+        ratio: ratio of the interpolation between the two conceptors
+               if ratio = 0, the conceptor of the first input is used (min. freq.)
+               if ratio = 1, the conceptor of the second input is used (max. freq.)
+        conceptor_layers: list of layer idxs to apply the conceptor to
+
         """
+        if conceptors is not None:
+            assert ratios.shape[0] == x.shape[0], "ratio size mismatch"
+
         B, T, F = x.shape
         padding = jnp.zeros((B, max_new_tokens, F), dtype=x.dtype)
         tokens = jnp.concatenate([x, padding], axis=1)
@@ -317,7 +331,10 @@ class GPT(nn.Module):
         # tokens index -> tokens None
         def scan_f(tokens, i):
             # forward the model to get the logits for the index in the sequence
-            y_pred, _ = self.apply({"params": params}, tokens, train=False)
+            y_pred, _ = self.apply({"params": params}, tokens, train=False,
+                                   conceptor_interpolation=conceptors is not None,
+                                   conceptors=conceptors, ratios=ratios,
+                                   conceptor_layers=conceptor_layers)
             # pluck the logits at the final step and scale by desired temperature
             y_pred = y_pred[:, i - 1, :]
             # append sampled index to the running sequence and continue

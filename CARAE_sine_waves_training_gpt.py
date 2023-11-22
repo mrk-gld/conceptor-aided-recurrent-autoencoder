@@ -41,7 +41,7 @@ def forward_conceptor(state, batch, *, train: bool, aperture, beta_1, beta_2, co
     return y_pred, loss, info
 
 
-@partial(jax.jit, static_argnames=('train', 'aperture', 'beta_1', 'beta_2', 'conceptor_layers'))
+@partial(jax.jit, static_argnames=('train', 'conceptor_layers'))
 def forward_conceptor_interpolation(state, batch, *, train: bool, conceptors, ratios,
                                     conceptor_layers):
     """
@@ -249,6 +249,9 @@ def main(_):
                 params=state.params,
                 x=ut_test[:, :FLAGS.len_cueing, :],
                 max_new_tokens=config.block_size-FLAGS.len_cueing,
+                conceptors=conceptor_manifold,
+                ratios=np.linspace(0, 1, 10)[1:-1],
+                conceptor_layers=conceptor_layers,
             )
             auto_loss_test = np.mean(
                 (pred[:, FLAGS.len_cueing:-1, :] - ut_test[:, FLAGS.len_cueing:, :]) ** 2
@@ -262,6 +265,9 @@ def main(_):
                 params=state.params,
                 x=ut_train[:, :FLAGS.len_cueing, :],
                 max_new_tokens=config.block_size-FLAGS.len_cueing,
+                conceptors=conceptor_manifold,
+                ratios=np.array([0., 1.]),
+                conceptor_layers=conceptor_layers,
             )
             auto_loss = np.mean(
                 (pred[:, FLAGS.len_cueing:-1, :] - ut_train[:, FLAGS.len_cueing:, :]) ** 2
