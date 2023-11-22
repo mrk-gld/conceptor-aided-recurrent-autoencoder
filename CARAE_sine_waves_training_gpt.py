@@ -131,7 +131,7 @@ flags.DEFINE_bool("plot_interp", True, "plot interpolation between sine waves")
 flags.DEFINE_bool("calc_metric", True, "calculate metric for interpolation")
 flags.DEFINE_bool("save_param", False, "save parameters")
 
-flags.DEFINE_integer("len_cueing", 20, "length of cueing period")
+flags.DEFINE_integer("len_cueing", 1, "length of cueing period")
 flags.DEFINE_integer("n_heads", 4, "number of attention heads")
 flags.DEFINE_integer("n_layers", 3, "number of transformer layers")
 # flags.DEFINE_integer("n_layers", 1, "number of transformer layers")
